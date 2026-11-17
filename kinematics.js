@@ -135,7 +135,7 @@ function frameOf(P, r0, r1, r2) {
 }
 
 // ---- kötések uniója két állapot között -------------------------------------
-function bondUnion(bA, bB) {
+export function bondUnion(bA, bB) {
   const key = (i, j) => (i < j ? `${i}-${j}` : `${j}-${i}`);
   const map = new Map();
   for (const [i, j, o] of bA) map.set(key(i, j), { i, j, oA: o, oB: 0 });

@@ -27,6 +27,9 @@
   --stage-in: #f9fbfd;
   --stage-out: #d6dde8;
   --ring-fill: #3b82f6;
+  --holo: #0f9fb0;
+  --holo-ink: #0b6f7c;
+  --holo-soft: #dff4f6;
   --shadow: 0 1px 2px rgba(19, 30, 52, .06), 0 10px 30px rgba(19, 30, 52, .07);
   --radius: 14px;
   --font-display: "Sora", "Inter", system-ui, sans-serif;
@@ -38,6 +41,7 @@
     --bg: #090d14; --surface: #10161f; --raised: #161e2b; --ink: #e5eaf2; --muted: #8f9aae;
     --faint: #687387; --line: #222b3a; --accent: #6aa6ff; --accent-ink: #08111f; --accent-soft: #172b47;
     --stage-in: #18212f; --stage-out: #080b11; --ring-fill: #7fb0ff;
+    --holo: #4fd6e4; --holo-ink: #8ae8f1; --holo-soft: #10333a;
     --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 12px 32px rgba(0, 0, 0, .3);
     color-scheme: dark;
   }
@@ -46,6 +50,7 @@
   --bg: #090d14; --surface: #10161f; --raised: #161e2b; --ink: #e5eaf2; --muted: #8f9aae;
   --faint: #687387; --line: #222b3a; --accent: #6aa6ff; --accent-ink: #08111f; --accent-soft: #172b47;
   --stage-in: #18212f; --stage-out: #080b11; --ring-fill: #7fb0ff;
+  --holo: #4fd6e4; --holo-ink: #8ae8f1; --holo-soft: #10333a;
   --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 12px 32px rgba(0, 0, 0, .3);
   color-scheme: dark;
 }
@@ -262,6 +267,29 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 50%; }
 
 .backdrop { display: none; }
 
+/* nézetváltó és hologram */
+.quick {
+  position: absolute; left: 12px; bottom: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+.seg.mini { width: auto; box-shadow: var(--shadow); }
+.seg.mini button { padding: 5px 12px; min-width: 42px; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--raised); font-size: 12.5px; font-weight: 500; color: var(--muted);
+  box-shadow: var(--shadow);
+}
+.pill[aria-pressed="true"] { background: var(--holo-soft); border-color: var(--holo); color: var(--holo-ink); }
+.chk-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.chk {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 8px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--raised); font-size: 12.5px; cursor: pointer; user-select: none;
+}
+.chk input { width: 14px; height: 14px; margin: 0; accent-color: var(--holo); }
+.chk:has(input:checked) { border-color: var(--holo); background: var(--holo-soft); }
+.chk:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.range { width: 100%; accent-color: var(--holo); }
+.sec.off .field { opacity: .5; }
+
 /* ---------- reszponzív ---------- */
 @media (max-width: 1180px) {
   .app { grid-template-columns: 240px minmax(0, 1fr) 280px; }
@@ -343,6 +371,16 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 50%; }
       <div class="labels" id="labels"></div>
       <div class="overlay-tl"><div class="legend" id="legend"></div></div>
       <div class="overlay-tr"><div class="rel" id="rel"></div></div>
+      <div class="quick" id="quick">
+        <div class="seg mini" id="segViewQ" role="group" aria-label="Nézet">
+          <button type="button" data-v="3d">3D</button>
+          <button type="button" data-v="paper">2D</button>
+        </div>
+        <button type="button" class="pill" id="holoQ" aria-pressed="false">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9z" opacity=".55"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg>
+          Hologram
+        </button>
+      </div>
       <div class="tooltip" id="tooltip" hidden></div>
       <div class="notice" id="notice" hidden></div>
     </div>
@@ -371,6 +409,28 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 50%; }
 
   <aside class="panel side right settings" id="right" aria-label="Beállítások">
     <div class="scroll">
+      <section class="sec" aria-labelledby="h-view">
+        <h3 id="h-view">Nézet</h3>
+        <div class="seg" id="segView" role="group" aria-label="Nézet">
+          <button type="button" data-v="3d">3D modell</button>
+          <button type="button" data-v="paper">Papír (2D)</button>
+        </div>
+        <p class="hint">A papírnézet a tankönyvi ábrákat követi: a nyílt lánc Fischer-projekcióban, a gyűrű Haworth-képletben látszik, de ugyanúgy forgatható és színezhető.</p>
+      </section>
+
+      <section class="sec" aria-labelledby="h-holo">
+        <h3 id="h-holo">Hologram</h3>
+        <label class="toggle"><input type="checkbox" id="holoOn"><span class="sw"></span><span class="tx">Hologram megjelenítése<small id="holoHint"></small></span></label>
+        <div class="field">
+          <label class="lab" for="holoOpacity">Átlátszóság</label>
+          <input class="range" type="range" id="holoOpacity" min="10" max="80" step="1">
+        </div>
+        <div class="field">
+          <span class="lab">A hologramon látszik</span>
+          <div class="chk-grid" id="holoParts"></div>
+        </div>
+      </section>
+
       <section class="sec" aria-labelledby="h-forma">
         <h3 id="h-forma">Forma</h3>
         <div class="field">

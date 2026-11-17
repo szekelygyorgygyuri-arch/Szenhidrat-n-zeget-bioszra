@@ -29,9 +29,19 @@ def main():
 
     html = read("index.html")
     data = read("data.js").replace("</", "<\\/")
-    kin = read("kinematics.js").replace("export const ", "const ").replace("export function ", "function ")
-    app = re.sub(r'^import \{[^}]*\} from "\./kinematics\.js";\n', "", read("app.js"), flags=re.M)
-    module = "<script type=\"module\">\n" + kin + "\n" + app + "\n</script>"
+    def module_scope(name):
+        # Helyi ES-modul beágyazása saját hatókörbe; az exportált nevek
+        # a közös modul-hatókörbe kerülnek.
+        src = read(name)
+        src = re.sub(r'^import \{[^}]*\} from "\./[a-z]+\.js";\n', "", src, flags=re.M)
+        names = re.findall(r'^export (?:const|function) ([A-Za-z_$][\w$]*)', src, flags=re.M)
+        src = re.sub(r'^export (const|function) ', r'\1 ', src, flags=re.M)
+        return "const { %s } = (() => {\n%s\nreturn { %s };\n})();\n" % (
+            ", ".join(names), src, ", ".join(names))
+
+    app = re.sub(r'^import \{[^}]*\} from "\./[a-z]+\.js";\n', "", read("app.js"), flags=re.M)
+    module = "<script type=\"module\">\n" + module_scope("kinematics.js") + module_scope("paper.js") \
+        + app + "\n</script>"
 
     html = html.replace('<script src="data.js"></script>', "<script>\n" + data + "</script>")
     html = html.replace('<script type="module" src="app.js"></script>', lambda_safe(module))

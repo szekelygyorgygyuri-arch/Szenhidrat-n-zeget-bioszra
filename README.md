@@ -30,11 +30,23 @@ megtekintéséhez.
   atomszínek, D/L konfiguráció, piranóz/furanóz, α/β anomer.
 - Gyűrűs formában kiírja, hogy a glikozidos OH és a ficak a gyűrű síkja
   felett vagy alatt áll (azonos vagy ellentétes oldalon).
+- **Papír (2D) nézet:** a tankönyvi ábrák térben. A nyílt lánc
+  **Fischer-projekcióban**, a gyűrűs forma **Haworth-képletben** látszik:
+  egy síkban fekvő, de forgatható modellként, ugyanazokkal a színekkel és
+  beállításokkal. Az animáció a tankönyvi átalakítást mutatja:
+  1. a Fischer-projekció elforgatása,
+  2. a lánc gyűrűvé hajlítása,
+  3. elfordulás a gyűrű-O-t hordozó szénatom körül,
+  4. a gyűrűzáródás.
+- **Hologram:** a másik modell áttetsző rávetítése ugyanazokkal a színekkel.
+  2D nézetben a valódi térbeli alakot, 3D nézetben a papírmodellt mutatja.
+  A hologramon külön ki/be kapcsolható a C-váz, az OH-csoportok, a
+  H-atomok, a ficak és a kamuficak, és állítható az átlátszósága.
 
 ## Megnyitás
 
 Az oldal statikus fájlokból áll (`index.html`, `app.js`, `kinematics.js`,
-`data.js`). A Three.js-t a jsDelivr CDN-ről tölti be. Böngészőben egy helyi
+`paper.js`, `data.js`). A Three.js-t a jsDelivr CDN-ről tölti be. Böngészőben egy helyi
 szerverrel nyitható meg:
 
 ```sh
@@ -71,3 +83,7 @@ python3 tools/generate_data.py
 - A gyűrűzáródás animációja belső koordináták (kötéshossz, kötésszög,
   torziós szög) interpolációjával készül (`kinematics.js`), ezért a
   királis centrumok térállása az animáció alatt sem fordul át.
+- A papírmodelleket (`paper.js`) a böngésző számolja a 3D szerkezetből: a
+  Fischer-projekció jobb/bal és a Haworth-képlet fent/lent irányai a valódi
+  térállásból adódnak. A hologramot merev illesztés (Horn-módszer) teszi
+  pontosan a fő modellre.
