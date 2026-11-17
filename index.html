@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- ARTIFACT-START -->
+<title>Szénhidrát 3D</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Mono- és diszacharidok 3D modelljei: nyílt lánc, gyűrűs forma, gyűrűzáródás és glikozidos kötés animációja.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Sora:wght@500;600&display=swap">
+<style>
+/* Elrendezés: három panel – molekulaválasztó | 3D-tér + idővonal | beállítások.
+   Keskeny képernyőn a két oldalsó panel fiókként csúszik be. */
+:root {
+  --bg: #e7ebf0;
+  --surface: #f8f9fb;
+  --raised: #ffffff;
+  --ink: #131a26;
+  --muted: #586376;
+  --faint: #8a94a5;
+  --line: #d5dbe4;
+  --accent: #1c6ccf;          /* Fehling-kék */
+  --accent-ink: #ffffff;
+  --accent-soft: #dde9fa;
+  --stage-in: #f9fbfd;
+  --stage-out: #d6dde8;
+  --ring-fill: #3b82f6;
+  --shadow: 0 1px 2px rgba(19, 30, 52, .06), 0 10px 30px rgba(19, 30, 52, .07);
+  --radius: 14px;
+  --font-display: "Sora", "Inter", system-ui, sans-serif;
+  --font-ui: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #090d14; --surface: #10161f; --raised: #161e2b; --ink: #e5eaf2; --muted: #8f9aae;
+    --faint: #687387; --line: #222b3a; --accent: #6aa6ff; --accent-ink: #08111f; --accent-soft: #172b47;
+    --stage-in: #18212f; --stage-out: #080b11; --ring-fill: #7fb0ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 12px 32px rgba(0, 0, 0, .3);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #090d14; --surface: #10161f; --raised: #161e2b; --ink: #e5eaf2; --muted: #8f9aae;
+  --faint: #687387; --line: #222b3a; --accent: #6aa6ff; --accent-ink: #08111f; --accent-soft: #172b47;
+  --stage-in: #18212f; --stage-out: #080b11; --ring-fill: #7fb0ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 12px 32px rgba(0, 0, 0, .3);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 13.5px/1.45 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+.app {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr) 304px;
+  gap: 12px;
+  padding-block: 12px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  min-height: 0;
+  min-width: 0;
+}
+
+/* ---------- bal oldal: molekulaválasztó ---------- */
+.side { display: flex; flex-direction: column; overflow: hidden; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 16px 16px 12px; }
+.brand svg { flex: none; color: var(--accent); }
+.brand h2 { margin: 0; font: 600 16px/1.2 var(--font-display); letter-spacing: -.01em; }
+.brand p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+.search { padding: 0 12px 10px; position: relative; }
+.search svg { position: absolute; left: 22px; top: 9px; color: var(--faint); pointer-events: none; }
+.search input {
+  width: 100%; padding: 7px 10px 7px 32px; border-radius: 9px;
+  border: 1px solid var(--line); background: var(--raised);
+}
+.search input::placeholder { color: var(--faint); }
+.scroll { overflow: auto; min-height: 0; flex: 1; padding: 0 8px 16px; scrollbar-width: thin; }
+
+details.grp > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px;
+  padding: 8px 8px; border-radius: 8px; user-select: none;
+}
+details.grp > summary::-webkit-details-marker { display: none; }
+details.grp > summary .chev { transition: transform .15s; color: var(--faint); flex: none; }
+details.grp[open] > summary .chev { transform: rotate(90deg); }
+details.lvl1 > summary { font: 600 12px/1.2 var(--font-ui); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+details.lvl1 > summary .count { margin-left: auto; font: 500 11px var(--font-mono); color: var(--faint); letter-spacing: 0; }
+details.lvl2 > summary { font-weight: 600; font-size: 13px; padding: 6px 8px; }
+details.lvl2 > summary .cn { color: var(--faint); font: 400 11.5px var(--font-mono); }
+details.lvl2 > summary:hover, details.lvl1 > summary:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.subhead { margin: 6px 0 2px 30px; font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: .07em; }
+.items { list-style: none; margin: 0; padding: 0 0 4px 18px; display: grid; gap: 1px; }
+.item {
+  width: 100%; display: flex; align-items: baseline; gap: 8px; text-align: left;
+  padding: 5px 10px; border: 0; border-radius: 7px; background: transparent;
+}
+.item:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.item .nm { font-weight: 500; }
+.item .meta { margin-left: auto; color: var(--faint); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item .meta.mono { font-family: var(--font-mono); font-size: 11px; }
+.item[aria-current="true"] { background: var(--accent-soft); color: var(--accent); }
+.item[aria-current="true"] .meta { color: color-mix(in srgb, var(--accent) 70%, var(--muted)); }
+.empty { padding: 20px 16px; color: var(--muted); }
+
+/* ---------- közép: 3D tér ---------- */
+.stage { display: flex; flex-direction: column; overflow: hidden; }
+.stage-head { display: flex; align-items: flex-start; gap: 12px; padding: 14px 18px 10px; border-bottom: 1px solid var(--line); }
+.title-block { min-width: 0; flex: 1; }
+.eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.title-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
+h1 { margin: 0; font: 600 24px/1.15 var(--font-display); letter-spacing: -.015em; text-wrap: balance; }
+.alt { color: var(--muted); font-size: 14px; }
+.state-name { margin-top: 4px; font-size: 14px; color: var(--ink); overflow-wrap: anywhere; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--raised); font-size: 12px; color: var(--muted); white-space: nowrap;
+}
+.chip.mono { font-family: var(--font-mono); font-size: 11.5px; }
+.desc { margin: 8px 0 0; max-width: 72ch; color: var(--muted); font-size: 12.5px; }
+.drawer-btn {
+  display: none; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 9px;
+  border: 1px solid var(--line); background: var(--raised); font-size: 12.5px; font-weight: 500; flex: none;
+}
+
+.viewport {
+  position: relative; flex: 1; min-height: 0;
+  background: radial-gradient(120% 90% at 50% 40%, var(--stage-in) 0%, var(--stage-out) 100%);
+  overflow: hidden; touch-action: none;
+}
+.viewport canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.labels { position: absolute; inset: 0; pointer-events: none; }
+.lbl {
+  position: absolute; left: 0; top: 0; transform: translate(-50%, -50%);
+  font: 500 11px/1 var(--font-mono); color: var(--ink); padding: 2px 4px; border-radius: 4px;
+  background: color-mix(in srgb, var(--raised) 78%, transparent); white-space: nowrap;
+}
+.lbl.o { color: var(--muted); }
+.tooltip {
+  position: absolute; pointer-events: none; padding: 5px 8px; border-radius: 7px; font-size: 12px;
+  background: var(--raised); border: 1px solid var(--line); box-shadow: var(--shadow); white-space: nowrap;
+}
+.tooltip b { font-family: var(--font-mono); font-weight: 500; }
+.overlay-tl, .overlay-tr {
+  position: absolute; top: 12px; display: flex; flex-direction: column; gap: 6px; pointer-events: none; max-width: calc(50% - 20px);
+}
+.overlay-tl { left: 12px; }
+.overlay-tr { right: 12px; align-items: flex-end; }
+.legend { display: flex; flex-direction: column; gap: 4px; }
+.legend span, .rel span {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--raised) 82%, transparent); border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  width: fit-content; max-width: 100%;
+}
+.dot { width: 10px; height: 10px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
+.rel { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+.rel span.verdict { font-weight: 600; color: var(--ink); }
+.notice {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); max-width: min(560px, calc(100% - 24px));
+  font-size: 12.5px; padding: 7px 12px; border-radius: 10px; background: var(--raised); border: 1px solid var(--line);
+  color: var(--muted); text-align: center; box-shadow: var(--shadow);
+}
+
+/* idővonal */
+.timeline { border-top: 1px solid var(--line); padding: 10px 14px 12px; display: grid; gap: 8px; }
+.tl-tabs { display: flex; gap: 4px; }
+.tl-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.endbtn {
+  border: 1px solid var(--line); background: var(--raised); border-radius: 9px; padding: 6px 10px;
+  font-size: 12.5px; font-weight: 500; white-space: nowrap;
+}
+.endbtn.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.play {
+  width: 38px; height: 38px; border-radius: 50%; border: 0; background: var(--accent); color: var(--accent-ink);
+  display: grid; place-items: center; flex: none;
+}
+.play:disabled, .endbtn:disabled, .seg button:disabled { opacity: .45; cursor: not-allowed; }
+.scrub { flex: 1; min-width: 120px; accent-color: var(--accent); }
+.speed { border: 1px solid var(--line); background: var(--raised); border-radius: 8px; padding: 5px 6px; font-size: 12.5px; }
+.caption { margin: 0; min-height: 2.9em; color: var(--muted); font-size: 13px; }
+.caption b { color: var(--ink); font-weight: 600; }
+.phase { font: 500 11px var(--font-mono); color: var(--accent); margin-right: 6px; }
+
+/* ---------- jobb oldal: beállítások ---------- */
+.settings .scroll { padding: 4px 16px 18px; }
+.sec { padding: 14px 0; border-bottom: 1px solid var(--line); display: grid; gap: 10px; }
+.sec:last-child { border-bottom: 0; }
+.sec h3 { margin: 0; font: 600 12px/1.2 var(--font-ui); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.field { display: grid; gap: 5px; }
+.field > .lab { font-size: 12px; color: var(--muted); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; background: var(--raised); padding: 2px; width: 100%; }
+.seg button { flex: 1; border: 0; background: transparent; padding: 5px 6px; border-radius: 7px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.seg button .s { font-weight: 400; opacity: .8; font-size: 11.5px; }
+.hint { font-size: 11.5px; color: var(--faint); }
+
+.hl-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.hl-row.absent { opacity: .45; }
+.hl-text { display: grid; min-width: 0; }
+.hl-name { font-weight: 500; }
+.hl-hint { font-size: 11.5px; color: var(--faint); }
+input[type="checkbox"].box { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
+input[type="color"] {
+  width: 26px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: none; cursor: pointer; overflow: hidden;
+}
+input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
+input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 50%; }
+input[type="color"]::-moz-color-swatch { border: 0; border-radius: 50%; }
+.eye {
+  width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised);
+  display: grid; place-items: center; color: var(--muted);
+}
+.eye[aria-pressed="false"] { color: var(--faint); background: transparent; }
+.eye .off { display: none; }
+.eye[aria-pressed="false"] .on { display: none; }
+.eye[aria-pressed="false"] .off { display: block; }
+
+.toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.toggle .sw {
+  width: 32px; height: 18px; border-radius: 999px; background: var(--line); position: relative; flex: none; transition: background .15s;
+}
+.toggle .sw::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--raised);
+  box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s;
+}
+.toggle input:checked + .sw { background: var(--accent); }
+.toggle input:checked + .sw::after { transform: translateX(14px); }
+.toggle input:focus-visible + .sw { outline: 2px solid var(--accent); outline-offset: 2px; }
+.toggle .tx { display: grid; }
+.toggle .tx small { color: var(--faint); font-size: 11.5px; }
+
+.el-colors { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.el-colors label { display: flex; align-items: center; gap: 6px; font: 500 12.5px var(--font-mono); }
+.btn {
+  border: 1px solid var(--line); background: var(--raised); border-radius: 9px; padding: 6px 10px; font-size: 12.5px; font-weight: 500;
+}
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.help { color: var(--faint); font-size: 11.5px; margin: 0; }
+
+.backdrop { display: none; }
+
+/* ---------- reszponzív ---------- */
+@media (max-width: 1180px) {
+  .app { grid-template-columns: 240px minmax(0, 1fr) 280px; }
+}
+@media (max-width: 920px) {
+  .app { grid-template-columns: minmax(0, 1fr); padding-block: 10px; }
+  .drawer-btn { display: inline-flex; }
+  .side {
+    position: fixed; z-index: 30; top: calc(env(safe-area-inset-top, 0px) + 10px); bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+    width: min(320px, calc(100vw - 48px)); transition: transform .22s ease, visibility .22s;
+    visibility: hidden;
+  }
+  .side.left { left: max(10px, env(safe-area-inset-left, 0px)); transform: translateX(calc(-100% - 24px)); }
+  .side.right { right: max(10px, env(safe-area-inset-right, 0px)); transform: translateX(calc(100% + 24px)); }
+  .side.open { transform: none; visibility: visible; }
+  .backdrop { position: fixed; inset: 0; z-index: 25; background: rgba(6, 10, 18, .38); }
+  .backdrop.show { display: block; }
+  .stage-head { padding: 10px 12px 8px; flex-wrap: wrap; }
+  .title-block { order: 3; flex-basis: 100%; }
+  .drawer-btn.right { margin-left: auto; }
+  h1 { font-size: 20px; }
+  .desc { display: none; }
+  .overlay-tl .legend { display: none; }
+}
+@media (max-width: 520px) {
+  .tl-row { gap: 8px; }
+  .scrub { order: 5; flex-basis: 100%; }
+  .caption { font-size: 12.5px; }
+  .overlay-tr { max-width: calc(100% - 24px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .side, .toggle .sw, .toggle .sw::after, details.grp > summary .chev { transition: none; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="panel side left" id="left" aria-label="Molekulák">
+    <div class="brand">
+      <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+        <path d="M17 3.5 28.7 10.25v13.5L17 30.5 5.3 23.75v-13.5z" fill="none" stroke="currentColor" stroke-width="2"/>
+        <circle cx="28.7" cy="10.25" r="3.2" fill="var(--bg)" stroke="currentColor" stroke-width="2"/>
+        <text x="28.7" y="12.3" font-size="5.2" text-anchor="middle" fill="currentColor" font-family="Inter, sans-serif" font-weight="700">O</text>
+        <path d="M28.7 23.75 32 26" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <path d="M5.3 10.25 2 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <div>
+        <h2>Szénhidrát 3D</h2>
+        <p>Mono- és diszacharidok térben</p>
+      </div>
+    </div>
+    <div class="search">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="search" type="search" placeholder="Keresés név alapján…" autocomplete="off" aria-label="Keresés">
+    </div>
+    <nav class="scroll" id="tree"></nav>
+  </aside>
+
+  <main class="panel stage">
+    <header class="stage-head">
+      <button class="drawer-btn left" id="openLeft" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        Molekulák
+      </button>
+      <div class="title-block">
+        <div class="eyebrow" id="eyebrow">Monoszacharid</div>
+        <div class="title-row"><h1 id="title">Glükóz</h1><span class="alt" id="alt"></span></div>
+        <div class="state-name" id="stateName"></div>
+        <div class="chips" id="chips"></div>
+        <p class="desc" id="desc"></p>
+      </div>
+      <button class="drawer-btn right" id="openRight" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+        Beállítások
+      </button>
+    </header>
+    <div class="viewport" id="viewport">
+      <canvas id="canvas" aria-label="A molekula 3D modellje"></canvas>
+      <div class="labels" id="labels"></div>
+      <div class="overlay-tl"><div class="legend" id="legend"></div></div>
+      <div class="overlay-tr"><div class="rel" id="rel"></div></div>
+      <div class="tooltip" id="tooltip" hidden></div>
+      <div class="notice" id="notice" hidden></div>
+    </div>
+    <div class="timeline">
+      <div class="tl-tabs seg" id="tlTabs" role="group" aria-label="Folyamat">
+        <button type="button" data-tl="closure" aria-pressed="true">Gyűrűzáródás</button>
+        <button type="button" data-tl="cond" aria-pressed="false">Glikozidos kötés kialakulása</button>
+      </div>
+      <div class="tl-row">
+        <button class="endbtn" id="btnStart" type="button">Nyílt lánc</button>
+        <button class="play" id="btnPlay" type="button" aria-label="Lejátszás">
+          <svg class="i-play" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>
+          <svg class="i-pause" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" hidden><path d="M6 4.5h4v15H6zM14 4.5h4v15h-4z"/></svg>
+        </button>
+        <input class="scrub" id="scrub" type="range" min="0" max="1000" step="1" value="1000" aria-label="Az animáció állása">
+        <button class="endbtn" id="btnEnd" type="button">Gyűrűs forma</button>
+        <select class="speed" id="speed" aria-label="Sebesség">
+          <option value="0.5">0,5×</option>
+          <option value="1" selected>1×</option>
+          <option value="2">2×</option>
+        </select>
+      </div>
+      <p class="caption" id="caption"></p>
+    </div>
+  </main>
+
+  <aside class="panel side right settings" id="right" aria-label="Beállítások">
+    <div class="scroll">
+      <section class="sec" aria-labelledby="h-forma">
+        <h3 id="h-forma">Forma</h3>
+        <div class="field">
+          <span class="lab">Konfiguráció</span>
+          <div class="seg" id="segCfg" role="group" aria-label="Konfiguráció">
+            <button type="button" data-v="D">D</button>
+            <button type="button" data-v="L">L</button>
+          </div>
+        </div>
+        <div class="field">
+          <span class="lab">Gyűrű</span>
+          <div class="seg" id="segRing" role="group" aria-label="Gyűrűméret">
+            <button type="button" data-v="p">Piranóz <span class="s">6 tagú</span></button>
+            <button type="button" data-v="f">Furanóz <span class="s">5 tagú</span></button>
+          </div>
+        </div>
+        <div class="field">
+          <span class="lab" id="anLab">Anomer</span>
+          <div class="seg" id="segAn" role="group" aria-label="Anomer">
+            <button type="button" data-v="a">α</button>
+            <button type="button" data-v="b">β</button>
+          </div>
+        </div>
+        <p class="hint" id="formHint"></p>
+      </section>
+
+      <section class="sec" aria-labelledby="h-hl">
+        <h3 id="h-hl">Kiemelések</h3>
+        <div id="hlRows" style="display:grid;gap:10px"></div>
+        <label class="toggle"><input type="checkbox" id="hlOpen"><span class="sw"></span><span class="tx">Kiemelés a nyílt láncon is<small>A színek követik az atomokat a gyűrűzáródás alatt</small></span></label>
+      </section>
+
+      <section class="sec" aria-labelledby="h-vis">
+        <h3 id="h-vis">Láthatóság</h3>
+        <label class="toggle"><input type="checkbox" id="showH"><span class="sw"></span><span class="tx">H-atomok</span></label>
+        <label class="toggle"><input type="checkbox" id="showOH"><span class="sw"></span><span class="tx">Sima OH-csoportok<small>a nem kiemelt hidroxilcsoportok</small></span></label>
+        <label class="toggle"><input type="checkbox" id="showLabels"><span class="sw"></span><span class="tx">C-atomok számozása</span></label>
+        <label class="toggle"><input type="checkbox" id="ringFill"><span class="sw"></span><span class="tx">Gyűrű síkjának jelölése</span></label>
+      </section>
+
+      <section class="sec" aria-labelledby="h-disp">
+        <h3 id="h-disp">Megjelenítés</h3>
+        <div class="field">
+          <span class="lab">Modell</span>
+          <div class="seg" id="segStyle" role="group" aria-label="Modell típusa">
+            <button type="button" data-v="bs">Golyó–pálcika</button>
+            <button type="button" data-v="st">Pálcika</button>
+            <button type="button" data-v="sf">Kalotta</button>
+          </div>
+        </div>
+        <div class="field">
+          <span class="lab">Atomok színe</span>
+          <div class="el-colors">
+            <label>C <input type="color" id="el-C" aria-label="Szénatom színe"></label>
+            <label>O <input type="color" id="el-O" aria-label="Oxigénatom színe"></label>
+            <label>H <input type="color" id="el-H" aria-label="Hidrogénatom színe"></label>
+            <label>N <input type="color" id="el-N" aria-label="Nitrogénatom színe"></label>
+          </div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="autoRotate"><span class="sw"></span><span class="tx">Automatikus forgatás</span></label>
+        <div class="btn-row">
+          <button class="btn" id="resetView" type="button">Nézet alaphelyzetbe</button>
+          <button class="btn" id="resetColors" type="button">Alapszínek</button>
+        </div>
+        <p class="help">Forgatás: húzás · Nagyítás: görgő vagy csippentés · Eltolás: jobb gomb vagy két ujj. Szóköz: lejátszás.</p>
+      </section>
+    </div>
+  </aside>
+</div>
+<div class="backdrop" id="backdrop"></div>
+
+<script src="data.js"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module" src="app.js"></script>
+<!-- ARTIFACT-END -->
+</body>
+</html>
