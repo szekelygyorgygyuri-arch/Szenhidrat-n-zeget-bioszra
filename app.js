@@ -2,10 +2,10 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import { makeClosure, makeCondensation, makeStatic, smooth, TIMING } from "./kinematics.js";
+import { makeClosure, makeCondensation, makeStatic, makeGrowth, approachDirs, smooth, TIMING } from "./kinematics.js";
 import {
   makePaperClosure, makePaperClosureDi, makePaperDiStatic, makePaperFischer, paperCondensationInput,
-  alignOnto, PAPER_T,
+  alignOnto, PAPER_T, polyLayout,
 } from "./paper.js";
 
 const DATA = window.SUGAR_DATA;
@@ -18,6 +18,15 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const MONO = new Map(DATA.monos.map((m) => [m.id, m]));
 const MONO_IDX = new Map(DATA.monos.map((m, i) => [m.id, i]));
 const DI = new Map(DATA.dis.map((d) => [d.id, d]));
+const POLYS = DATA.polys || [];
+const POLY = new Map(POLYS.map((p) => [p.id, p]));
+const POLY_GROUPS = [
+  ["glukan", "Glükánok (glükózból)"],
+  ["fruktan", "Fruktánok (fruktózból)"],
+  ["homo", "Egyéb homopoliszacharidok"],
+  ["hetero", "Heteropoliszacharidok"],
+];
+const POLY_GROUP = Object.fromEntries(POLY_GROUPS);
 const CLS = { 3: "Triózok", 4: "Tetrózok", 5: "Pentózok", 6: "Hexózok", 7: "Heptózok" };
 const CLS1 = { 3: "Trióz", 4: "Tetróz", 5: "Pentóz", 6: "Hexóz", 7: "Heptóz" };
 const SUBS = ["aldo", "keto", "dezoxi", "amino", "uron"];
@@ -36,12 +45,13 @@ const GROUPS = [
 ];
 const GROUP = Object.fromEntries(GROUPS.map((g) => [g.key, g]));
 const PRIORITY = ["ficak", "kamu", "ringO", "glyc", "bridge"]; // a későbbi felülírja a korábbit
-const EL_DEFAULT = { C: "#5f6877", O: "#e23b3b", H: "#eef1f5", N: "#3d6fe0" };
+const EL_DEFAULT = { C: "#5f6877", O: "#e23b3b", H: "#eef1f5", N: "#3d6fe0", S: "#e0b11f" };
+const ELS = ["C", "O", "H", "N", "S"];
 
 const RADII = {
-  bs: { C: 0.3, O: 0.28, N: 0.29, H: 0.18, bond: 0.085, dbl: 0.06, off: 0.075 },
-  st: { C: 0.13, O: 0.13, N: 0.13, H: 0.1, bond: 0.13, dbl: 0.07, off: 0.1 },
-  sf: { C: 1.55, O: 1.38, N: 1.42, H: 1.0, bond: 0, dbl: 0, off: 0 },
+  bs: { C: 0.3, O: 0.28, N: 0.29, H: 0.18, S: 0.34, bond: 0.085, dbl: 0.06, off: 0.075 },
+  st: { C: 0.13, O: 0.13, N: 0.13, H: 0.1, S: 0.13, bond: 0.13, dbl: 0.07, off: 0.1 },
+  sf: { C: 1.55, O: 1.38, N: 1.42, H: 1.0, S: 1.8, bond: 0, dbl: 0, off: 0 },
 };
 
 // ---------------------------------------------------------------------------
@@ -85,7 +95,7 @@ const save = () => { try { localStorage.setItem(STORE, JSON.stringify(S)); } cat
 // ---------------------------------------------------------------------------
 //  Állapot
 // ---------------------------------------------------------------------------
-const st = { rec: null, di: false, cfg: "D", vkey: null, tl: "closure", t: 1, playing: false };
+const st = { rec: null, di: false, poly: false, cfg: "D", vkey: null, tl: "closure", t: 1, playing: false };
 let models = null; // { m3, mP }
 let model = null; // a fő (látható) modell
 let holoModel = null; // a hologramként rávetített másik modell
@@ -126,7 +136,17 @@ function tryPaper(fn) {
 function buildModels() {
   const r = st.rec;
   let m3, mP = null, meta;
-  if (!st.di) {
+  if (st.poly) {
+    const X = Float64Array.from(r.x);
+    m3 = makeGrowth({ X, bonds: r.b, resi: r.resi, order: r.order, dirs: approachDirs(X, r.residues, r.bridges) });
+    meta = { el: r.el, lab: r.lab, bb: r.bb, groups: r.g, ohs: r.ohs, kind: "poly",
+      rings: r.residues.map((x) => ({ idx: x.ring })) };
+    mP = tryPaper(() => {
+      const XP = polyLayout({ X3: X, el: r.el, bonds: r.b, resi: r.resi, residues: r.residues, bridges: r.bridges,
+        root: r.root, order: r.order });
+      return makeGrowth({ X: XP, bonds: r.b, resi: r.resi, order: r.order, dirs: approachDirs(XP, r.residues, r.bridges) });
+    });
+  } else if (!st.di) {
     const mirror = st.cfg === "L";
     const v = r.v.find((x) => x.key === st.vkey);
     const Xo = f64(r.open.x, mirror);
@@ -234,7 +254,7 @@ const WHITE = new THREE.Color(1, 1, 1);
 const BLACK = new THREE.Color(0, 0, 0);
 const elColor = {};
 function refreshElColors() {
-  for (const e of ["C", "O", "H", "N"]) elColor[e] = new THREE.Color(S.el[e] || EL_DEFAULT[e]);
+  for (const e of ELS) elColor[e] = new THREE.Color(S.el[e] || EL_DEFAULT[e]);
 }
 refreshElColors();
 const hlColor = {};
@@ -464,6 +484,23 @@ function buildLabels() {
   $("#labels").innerHTML = "";
   labelEls = [];
   const m = model;
+  if (st.poly) {
+    // poliszacharidnál csak a kötéseket jelöljük (a sok C-számozás áttekinthetetlen lenne)
+    // a gyakori kötéstípusból csak egyet, a ritkábbakat (pl. elágazások) mindenhol
+    const cnt = {}, seen = {};
+    for (const b of st.rec.bridges) cnt[b.link] = (cnt[b.link] || 0) + 1;
+    const byOrder = [...st.rec.bridges].sort((a, b) => st.rec.order.indexOf(a.child) - st.rec.order.indexOf(b.child));
+    for (const b of byOrder) {
+      seen[b.link] = (seen[b.link] || 0) + 1;
+      if (cnt[b.link] > 3 && seen[b.link] > 1) continue;
+      const el = document.createElement("span");
+      el.className = "lbl link";
+      el.textContent = b.link;
+      $("#labels").appendChild(el);
+      labelEls.push({ i: b.o, el, link: true, gate: b.aC });
+    }
+    return;
+  }
   if (st.di && (m.groups.bridge || []).length) {
     const el = document.createElement("span");
     el.className = "lbl link";
@@ -487,8 +524,9 @@ let labelEls = [];
 function updateLabels() {
   const w = viewport.clientWidth, h = viewport.clientHeight;
   const show = S.labels;
-  for (const { i, el, link } of labelEls) {
-    if (!show || !mainLayer.vis[i] || mainLayer.alpha[i] < 0.3 || (link && (quizHidden() || st.t < 0.6))) { el.hidden = true; continue; }
+  for (const { i, el, link, gate } of labelEls) {
+    const hideLink = link && (quizHidden() || (gate !== undefined ? mainLayer.alpha[gate] < 0.6 : st.t < 0.6));
+    if (!show || !mainLayer.vis[i] || mainLayer.alpha[i] < 0.3 || hideLink) { el.hidden = true; continue; }
     vA.set(P[3 * i], P[3 * i + 1], P[3 * i + 2]).project(camera);
     if (vA.z > 1) { el.hidden = true; continue; }
     el.hidden = false;
@@ -525,6 +563,7 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / Math.max(1, h);
   camera.updateProjectionMatrix();
+  needRender = true;
 }
 new ResizeObserver(resize).observe(viewport);
 
@@ -535,8 +574,9 @@ const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
 const STAR_SVG = `<svg class="st" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.6 5.5 6 .8-4.4 4.1 1.1 5.9L12 16.6l-5.3 2.9 1.1-5.9L3.4 9.5l6-.8z"/></svg>`;
 const isFav = (id) => S.fav.includes(id);
-const ALL_IDS = [...DATA.monos.map((m) => m.id), ...DATA.dis.map((d) => d.id)];
-const recOf = (id) => MONO.get(id) || DI.get(id);
+const ALL_IDS = [...DATA.monos.map((m) => m.id), ...DATA.dis.map((d) => d.id), ...POLYS.map((p) => p.id)];
+const recOf = (id) => MONO.get(id) || DI.get(id) || POLY.get(id);
+const kindOf = (id) => (MONO.has(id) ? "mono" : DI.has(id) ? "di" : "poly");
 // Diszacharidok: az 1. egység szerint, egyezés esetén a 2. szerint (mint a vezeték- és utónév)
 const linkPos = (d) => +((d.link.match(/[→↔](\d)/) || [0, 9])[1]);
 const DIS_SORTED = [...DATA.dis].sort((a, b) =>
@@ -565,6 +605,7 @@ function itemButton(id, name, meta, metaMono, search) {
   return li;
 }
 const monoItem = (m) => itemButton(m.id, m.name, m.alt || m.formula, !m.alt, `${m.name} ${m.alt} ${m.id}`);
+const polyItem = (p) => itemButton(p.id, p.name, p.links.join(", "), true, `${p.name} ${p.alt} ${p.id} ${p.repeat}`);
 const diItem = (d) => itemButton(d.id, d.name, d.link, true, `${d.name} ${d.alt} ${d.id} ${unitName(d.A)} ${unitName(d.B)}`);
 const chev = `<svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>`;
 function details(cls, title, extra, open, key) {
@@ -593,10 +634,12 @@ function buildTree() {
   // Csillagozottak előre (ha a kereső melletti csillag be van kapcsolva)
   if (S.favFirst) {
     const fm = DATA.monos.filter((m) => isFav(m.id)), fd = DIS_SORTED.filter((d) => isFav(d.id));
-    const fav = details("lvl1 fav", "Csillagozottak", `<span class="count">${fm.length + fd.length}</span>`, true, "fav");
+    const fp = POLYS.filter((p) => isFav(p.id));
+    const fav = details("lvl1 fav", "Csillagozottak", `<span class="count">${fm.length + fd.length + fp.length}</span>`, true, "fav");
     if (fm.length) subList(fav, "Monoszacharidok", fm.map(monoItem));
     if (fd.length) subList(fav, "Diszacharidok", fd.map(diItem));
-    if (!fm.length && !fd.length) {
+    if (fp.length) subList(fav, "Poliszacharidok", fp.map(polyItem));
+    if (!fm.length && !fd.length && !fp.length) {
       const p = document.createElement("p");
       p.className = "empty";
       p.textContent = "Még nincs csillagozott molekula. A nevek melletti csillaggal jelölheted meg őket.";
@@ -636,6 +679,14 @@ function buildTree() {
   }
   flush();
   nav.appendChild(top);
+  if (POLYS.length) {
+    const pol = details("lvl1", "Poliszacharidok", `<span class="count">${POLYS.length}</span>`, true, "poly");
+    for (const [g, title] of POLY_GROUPS) {
+      const ls = POLYS.filter((p) => p.group === g);
+      if (ls.length) subList(pol, title, ls.map(polyItem));
+    }
+    nav.appendChild(pol);
+  }
   const empty = document.createElement("p");
   empty.className = "empty";
   empty.id = "emptyMsg";
@@ -712,7 +763,7 @@ function syncControls() {
     eye.title = S.vis[g.key] ? "Elrejtés" : "Megjelenítés";
   }
   for (const id of TOGGLES) $(`#${TOGGLE_ID[id] || id}`).checked = !!S[id];
-  for (const e of ["C", "O", "H", "N"]) $(`#el-${e}`).value = S.el[e];
+  for (const e of ELS) $(`#el-${e}`).value = S.el[e] || EL_DEFAULT[e];
   $$("#segStyle button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === S.style)));
   $("#speed").value = String(S.speed);
   controls.autoRotate = !!S.autoRotate;
@@ -757,7 +808,7 @@ function bindControls() {
   for (const id of TOGGLES) {
     $(`#${TOGGLE_ID[id] || id}`).addEventListener("change", (e) => { S[id] = e.target.checked; save(); syncControls(); changed(); });
   }
-  for (const e of ["C", "O", "H", "N"]) {
+  for (const e of ELS) {
     $(`#el-${e}`).addEventListener("input", (ev) => { S.el[e] = ev.target.value; refreshElColors(); save(); changed(); });
   }
   $("#segStyle").addEventListener("click", (e) => {
@@ -881,6 +932,13 @@ function load(id, opts = {}) {
   if (!rec) return;
   st.rec = rec;
   st.di = DI.has(id);
+  st.poly = POLY.has(id);
+  if (st.poly) {
+    st.cfg = "D"; st.vkey = null; st.tl = "poly"; st.playing = false; st.t = 1;
+    rebuild(true);
+    markCurrent();
+    return;
+  }
   st.cfg = rec.cfg || "D";
   st.vkey = opts.vkey ?? rec.defv ?? null;
   st.tl = "closure";
@@ -917,13 +975,13 @@ function quizNew() {
   let cand = pool.ids.filter((id) => id !== Q.last);
   if (!cand.length) cand = pool.ids;
   const id = cand[Math.floor(Math.random() * cand.length)];
-  const isDi = DI.has(id);
+  const kind = kindOf(id);
   // válaszlehetőségek: a csillagozottakból, ha kevés, hasonló molekulákkal kiegészítve
-  let others = shuffle(pool.ids.filter((x) => x !== id && DI.has(x) === isDi));
-  if (others.length < 3) others = others.concat(shuffle(pool.ids.filter((x) => x !== id && DI.has(x) !== isDi)));
+  let others = shuffle(pool.ids.filter((x) => x !== id && kindOf(x) === kind));
+  if (others.length < 3) others = others.concat(shuffle(pool.ids.filter((x) => x !== id && kindOf(x) !== kind)));
   if (others.length < 3) {
-    const rank = (x) => (isDi ? 0 : Math.abs(MONO.get(x).n - MONO.get(id).n));
-    const extra = shuffle(ALL_IDS.filter((x) => x !== id && !others.includes(x) && DI.has(x) === isDi))
+    const rank = (x) => (kind !== "mono" ? 0 : Math.abs(MONO.get(x).n - MONO.get(id).n));
+    const extra = shuffle(ALL_IDS.filter((x) => x !== id && !others.includes(x) && kindOf(x) === kind))
       .sort((a, b) => rank(a) - rank(b));
     others = others.concat(extra);
   }
@@ -969,7 +1027,7 @@ function renderQuiz() {
     b.dataset.id = id;
     b.innerHTML = `<span></span><small></small>`;
     b.querySelector("span").textContent = r.name;
-    b.querySelector("small").textContent = DI.has(id) ? "diszacharid" : "monoszacharid";
+    b.querySelector("small").textContent = { mono: "monoszacharid", di: "diszacharid", poly: "poliszacharid" }[kindOf(id)];
     if (Q.answered) {
       b.disabled = true;
       if (id === Q.id) b.classList.add("ok");
@@ -983,7 +1041,7 @@ function renderQuiz() {
     $("#qNext").textContent = "Másikat kérek";
   } else {
     const ok = Q.picked === Q.id;
-    const extra = st.di ? ` – ${bondInfo(r).long}` : "";
+    const extra = st.di ? ` – ${bondInfo(r).long}` : st.poly ? ` – ${r.bondtext}` : "";
     const picked = ok ? "" : ` (Te ezt választottad: ${recOf(Q.picked).name}.)`;
     $("#qMsg").innerHTML = `<b>${ok ? "Helyes!" : "Nem talált."}</b> Ez ${ok ? "" : "volt "}a molekula: <b></b> · <span></span>${extra}${picked}`;
     $("#qMsg").querySelector("b + b").textContent = r.name;
@@ -1050,18 +1108,25 @@ function updateStaticUI() {
   $("#desc").textContent = r.desc;
   document.title = Q.on ? "Tippelő – Szénhidrát 3D" : `${r.name} – Szénhidrát 3D`;
   $("#formHint").hidden = quizHidden();
-  if (!st.di) {
+  if (st.poly) {
+    $("#eyebrow").textContent = `Poliszacharid · ${POLY_GROUP[r.group].replace(/ \(.*\)/, "").toLowerCase()} · ${r.nres} egységes részlet`;
+  } else if (!st.di) {
     $("#eyebrow").textContent = `Monoszacharid · ${CLS1[r.n]} · ${SUB1[r.sub]}`;
   } else {
     $("#eyebrow").textContent = `Diszacharid · ${unitName(r.A)} + ${unitName(r.B)} · ${r.reducing ? "redukáló" : "nem redukáló"}`;
   }
   // forma-választók
   const cfgBtns = $$("#segCfg button");
-  const chiral = !st.di && !!r.cfg;
+  const chiral = !st.di && !st.poly && !!r.cfg;
   cfgBtns.forEach((b) => { b.disabled = !chiral; b.setAttribute("aria-pressed", String(chiral && b.dataset.v === st.cfg)); });
   const ringBtns = $$("#segRing button"), anBtns = $$("#segAn button");
   let hint = "";
-  if (!st.di) {
+  if (st.poly) {
+    ringBtns.forEach((b) => { b.disabled = true; b.setAttribute("aria-pressed", "false"); });
+    anBtns.forEach((b) => { b.disabled = true; b.setAttribute("aria-pressed", "false"); });
+    $("#anLab").textContent = "Anomer";
+    hint = `Poliszacharid-részlet ${r.nres} egységgel. A valódi molekula: ${r.real || "sok száz–sok ezer egység"}.`;
+  } else if (!st.di) {
     const rings = new Set(r.v.map((v) => v.ring));
     const cur = r.v.find((v) => v.key === st.vkey);
     ringBtns.forEach((b) => { b.disabled = !rings.has(b.dataset.v); b.setAttribute("aria-pressed", String(!!cur && cur.ring === b.dataset.v)); });
@@ -1098,8 +1163,8 @@ function updateStaticUI() {
   const tl = hasTimeline();
   for (const id of ["#btnStart", "#btnEnd", "#btnPlay", "#scrub", "#speed"]) $(id).disabled = !tl;
   const cond = model.kind === "cond";
-  $("#btnStart").textContent = cond ? "Két monoszacharid" : model.paper ? "Fischer-projekció" : "Nyílt lánc";
-  $("#btnEnd").textContent = cond ? "Diszacharid" : model.paper ? "Haworth-képlet" : "Gyűrűs forma";
+  $("#btnStart").textContent = st.poly ? "Első egység" : cond ? "Két monoszacharid" : model.paper ? "Fischer-projekció" : "Nyílt lánc";
+  $("#btnEnd").textContent = st.poly ? "Kész lánc" : cond ? "Diszacharid" : model.paper ? "Haworth-képlet" : "Gyűrűs forma";
   // nézet és hologram
   const hasPaper = !!models.mP;
   $$("#segView button, #segViewQ button").forEach((b) => {
@@ -1114,6 +1179,7 @@ function updateStaticUI() {
 // ---- állapotfüggő szövegek -------------------------------------------------------
 function stateName() {
   const r = st.rec, t = st.t;
+  if (st.poly) return `Ismétlődő egység: ${r.repeat}`;
   if (!st.di) {
     const v = model.v;
     if (!v || t <= 0.001) return `${lowerName(r)} – ${model.paper ? "Fischer-projekció" : "nyílt láncú forma"}`;
@@ -1133,8 +1199,19 @@ function stateName() {
   return `${v.common} · ${v.name}`;
 }
 
+function polyCaption() {
+  const t = st.t, r = st.rec, n = r.nres;
+  if (t <= 0.001) return `<span class="phase">1.</span><b>Az első egység (a redukáló vég).</b> Innen nő a lánc: minden új egység glikozidos kötéssel kapcsolódik, és közben egy vízmolekula lép ki (kondenzáció).`;
+  if (t < 0.999) {
+    const k = model.progress(t);
+    return `<span class="phase">${k}.</span><b>Lánchosszabbítás:</b> a ${k}. egység kapcsolódik (${n} közül). A lánc a nem redukáló vég${r.residues.some((x) => x.parent >= 0 && r.residues.filter((y) => y.parent === x.parent).length > 1) ? "ek" : ""} felé nő.`;
+  }
+  return `<b>${hideName(r.name)} – ${n} egységes részlet.</b> ${hideName(r.bondtext)}. A valódi molekula: ${r.real || "sok száz–sok ezer egység"}.`;
+}
+
 function caption() {
   const t = st.t, m = model, r = st.rec;
+  if (st.poly) return polyCaption();
   if (m.kind === "static") {
     if (!st.di) return r.v.length ? "" : "Ez a molekula nem képez stabil gyűrűt; csak nyílt láncú formája létezik.";
     return "<b>Nem redukáló diszacharid.</b> Mindkét glikozidos OH a kötésben van, ezért egyik gyűrű sem nyílhat fel. Nézd meg a glikozidos kötés kialakulását!";
@@ -1192,12 +1269,17 @@ function updateDynamicUI() {
   $("#stateName").textContent = stateName();
   const r = st.rec;
   const chips = [`<span class="chip mono">${r.formula}</span>`, `<span class="chip">${fmtMass(r.mass)}</span>`];
+  if (st.poly) {
+    chips[1] = `<span class="chip">${r.nres} egység</span>`;
+    for (const l of r.links) chips.push(`<span class="chip bond"><i class="dot" style="background:${S.colors.bridge}"></i>${l}</span>`);
+    $("#bondLine").textContent = r.bondtext;
+  }
   if (st.di) {
     const bi = bondInfo(r);
     chips.push(`<span class="chip bond" title="${bi.long}"><i class="dot" style="background:${S.colors.bridge}"></i>${bi.short}</span>`);
     $("#bondLine").textContent = bi.long;
   }
-  $("#bondLine").hidden = !st.di;
+  $("#bondLine").hidden = !st.di && !st.poly;
   $("#chips").innerHTML = chips.join("");
   $("#caption").innerHTML = caption();
   $("#scrub").value = String(Math.round(st.t * 1000));
@@ -1262,7 +1344,7 @@ canvas.addEventListener("pointermove", (e) => {
   tip.style.left = `${Math.min(x, rect.width - tip.offsetWidth - 8)}px`;
   tip.style.top = `${Math.min(y, rect.height - tip.offsetHeight - 8)}px`;
 });
-const EL_NAME = { C: "szén", O: "oxigén", H: "hidrogén", N: "nitrogén" };
+const EL_NAME = { C: "szén", O: "oxigén", H: "hidrogén", N: "nitrogén", S: "kén" };
 function atomInfo(i) {
   const m = model;
   let lab = m.lab[i];
@@ -1274,32 +1356,38 @@ function atomInfo(i) {
       const a = b.alpha(st.t);
       if (a > best) { best = a; host = b.i === i ? b.j : b.i; }
     }
-    lab = host !== null && m.lab[host] ? `${m.el[i]} · ${m.lab[host]}-hez kötve` : m.el[i] === "H" ? "H" : `${m.el[i]} (acetilcsoport)`;
+    lab = host !== null && m.lab[host] ? `${m.el[i]} · ${m.lab[host]}-hez kötve` : m.el[i] === "H" ? "H" : m.el[i];
   }
   const g = m.groupOf[i];
-  return `<b>${lab}</b> · ${EL_NAME[m.el[i]]}${g ? ` · ${GROUP[g].name}` : ""}`;
+  const unitNo = st.poly ? ` · ${st.rec.resi[i] + 1}. egység` : "";
+  return `<b>${lab}</b> · ${EL_NAME[m.el[i]]}${g ? ` · ${GROUP[g].name}` : ""}${unitNo}`;
 }
 
 // ---- fő ciklus ---------------------------------------------------------------
-const DURATION = { closure: 7, paper: 9, cond: 7.5 };
+let needRender = true;
+const DURATION = { closure: 7, paper: 9, cond: 7.5, poly: 9 };
 let last = performance.now();
 function loop(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   if (st.playing && hasTimeline()) {
-    st.t += (dt * S.speed) / DURATION[model.kind === "cond" ? "cond" : model.paper ? "paper" : "closure"];
+    st.t += (dt * S.speed) / DURATION[st.poly ? "poly" : model.kind === "cond" ? "cond" : model.paper ? "paper" : "closure"];
     if (st.t >= 1) { st.t = 1; st.playing = false; }
     dirty = true;
   }
+  // csak akkor rajzolunk újra, ha valami változott (kíméli a telefon akkuját)
   const moved = controls.update();
   if (dirty) {
     renderFrame();
     updateDynamicUI();
     dirty = false;
+    needRender = true;
   }
-  renderer.render(scene, camera);
-  updateLabels();
-  void moved;
+  if (needRender || moved || controls.autoRotate) {
+    renderer.render(scene, camera);
+    updateLabels();
+    needRender = false;
+  }
   requestAnimationFrame(loop);
 }
 

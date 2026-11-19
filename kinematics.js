@@ -411,3 +411,55 @@ export function makeStatic(X, bonds) {
     atomAlpha: () => 1,
   };
 }
+
+/**
+ * Poliszacharid-részlet felépülése: az egységek a redukáló végtől kifelé,
+ * egymás után kapcsolódnak (minden lépésben glikozidos kötés + vízkilépés).
+ * @param o.X       a kész részlet koordinátái
+ * @param o.resi    atomonként az egység sorszáma
+ * @param o.order   az egységek kapcsolódási sorrendje (az első a redukáló vég)
+ * @param o.dirs    egységenként a közeledés iránya (egységvektor)
+ */
+export function makeGrowth({ X, bonds, resi, order, dirs }) {
+  const N = X.length / 3;
+  const n = order.length;
+  const rank = new Int32Array(Math.max(...order) + 1);
+  order.forEach((r, q) => { rank[r] = q; });
+  const win = (r) => {
+    const q = rank[r];
+    return q === 0 ? null : [(q - 1) / (n - 1), q / (n - 1)];
+  };
+  function frame(t, out = new Float64Array(N * 3)) {
+    for (let i = 0; i < N; i++) {
+      const w = win(resi[i]);
+      const s = w ? ease(clamp01((t - w[0]) / (w[1] - w[0]))) : 1;
+      const d = dirs[resi[i]];
+      const k = (1 - s) * 2.6;
+      out[3 * i] = X[3 * i] + d[0] * k;
+      out[3 * i + 1] = X[3 * i + 1] + d[1] * k;
+      out[3 * i + 2] = X[3 * i + 2] + d[2] * k;
+    }
+    return out;
+  }
+  const atomAlpha = (t, i) => {
+    const w = win(resi[i]);
+    return w ? smooth(w[0], w[0] + (w[1] - w[0]) * 0.55, t) : 1;
+  };
+  return {
+    N, frame, atomAlpha,
+    bonds: bonds.map(([i, j, o2]) => ({ i, j, alpha: () => 1, second: o2 === 2 ? () => 1 : () => 0 })),
+    progress: (t) => Math.min(n, 1 + Math.floor(t * (n - 1) + 1e-6)),
+  };
+}
+
+/** Egységenkénti közeledési irány: a hídoxigéntől az egység gyűrűjének közepe felé. */
+export function approachDirs(X, residues, bridges) {
+  return residues.map((res, r) => {
+    const b = bridges.find((x) => x.child === r);
+    if (!b) return [0, 0, 0];
+    let c = [0, 0, 0];
+    for (const i of res.ring) c = add(c, get(X, i));
+    c = mul(c, 1 / res.ring.length);
+    return unit(sub(c, get(X, b.o)));
+  });
+}

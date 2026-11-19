@@ -722,3 +722,98 @@ export function alignOnto(Mov, Ref, idx, out = new Float64Array(Mov.length)) {
   }
   return out;
 }
+
+// ---- poliszacharidok -------------------------------------------------------------------
+/**
+ * Poliszacharid-részlet síkbeli Haworth-képlete: a redukáló vég jobbra kerül,
+ * a lánc balra nő; az elágazások a szabad hely felé indulnak. Minden egység
+ * állását (a gyűrű elforgatása, a lap megfordítása) és helyét úgy választjuk,
+ * hogy a kapcsolódó szénatom a szülő felé nézzen és ne takarjon semmit.
+ */
+export function polyLayout({ X3, el, bonds, resi, residues, bridges, root, order }) {
+  const N = el.length;
+  const adj = adjacency(N, bonds);
+  const out = new Float64Array(N * 3), placed = new Uint8Array(N);
+  const typeOf = (r) => ringTypeOf(residues[r].ring);
+  haworthLayout({ X3, el, adj, ring: residues[root].ring, ringType: typeOf(root), inUnit: (i) => resi[i] === root, out, placed });
+  for (const r of order) {
+    if (r === root) continue;
+    const br = bridges.find((b) => b.child === r);
+    const ring = residues[r].ring;
+    const type = typeOf(r);
+    const nSlots = type === "p" ? 6 : 5, step = type === "p" ? 60 : 72;
+    const parentRing = residues[br.parent].ring;
+    const exo = !parentRing.includes(br.cx);
+    const Cx = get(out, br.cx), Ob = get(out, br.o);
+    const dB = Math.sign(Ob[1] - Cx[1]) || -1;
+    // lehetséges helyek a gyerek kapcsolódó C-atomjának; a lánc lehetőleg egyenesen balra haladjon
+    const spots = exo
+      ? [[-1.2, 0.8, 0], [-1.2, -0.8, 0.3], [1.2, 0.8, 1.2], [1.2, -0.8, 1.2]]
+      : [[-2.6, 0, 0], [2.6, 0, 1.5], [-2.0, 2.4, 0.9], [-2.0, -2.4, 0.9], [2.0, 2.4, 1.8], [2.0, -2.4, 1.8]];
+    const anchors = spots.map(([dx, dy]) => add(exo ? Ob : Cx, [dx, dy, 0]));
+    const placedIdx = [];
+    for (let i = 0; i < N; i++) if (placed[i] && i !== br.o) placedIdx.push(i);
+    const pcx = parentRing.reduce((m, i) => m + out[3 * i], 0) / parentRing.length;
+    let best = null;
+    for (let k = 0; k < nSlots; k++) {
+      const B0 = new Float64Array(N * 3), pB = new Uint8Array(N);
+      const info = haworthLayout({ X3, el, adj, ring, ringType: type, inUnit: (i) => resi[i] === r, out: B0, placed: pB, yaw: k * step });
+      const bInfo = info.bridge.find((b) => b.from === br.aC);
+      for (const sx of [1, -1]) for (const sy of [1, -1]) {
+        const B = Float64Array.from(B0);
+        flipUnit(B, pB, sx, sy);
+        const dA = (bInfo ? bInfo.dir : -1) * sy;
+        const own = [];
+        for (let i = 0; i < N; i++) if (pB[i]) own.push(i);
+        const ac = get(B, br.aC);
+        const ringPts = ring.map((i) => get(B, i));
+        const cy = ringPts.reduce((m, p) => m + p[1], 0) / ring.length;
+        // a gyűrű belsejébe lógó szénlánc és a lent lévő gyűrű-O kerülendő
+        let inner = 0;
+        for (const rr of ring) {
+          const ry = get(B, rr)[1] - cy;
+          for (const c of adj[rr]) {
+            if (ring.includes(c) || resi[c] !== r || el[c] !== "C") continue;
+            const dy = get(B, c)[1] - get(B, rr)[1];
+            if ((ry > 0.5 && dy < 0) || (ry < -0.5 && dy > 0)) inner++;
+          }
+        }
+        const oTop = get(B, ring[ring.length - 1])[1] >= Math.max(...ringPts.map((p) => p[1])) - 0.05;
+        anchors.forEach((an, ai) => {
+          const delta = sub(an, ac);
+          // a kapcsolódó C legyen a gyűrű szülő felé eső széle
+          const tgt = exo ? Ob : Cx;
+          const dAc = len(sub(add(ac, delta), tgt));
+          const dMin = Math.min(...ringPts.map((p) => len(sub(add(p, delta), tgt))));
+          let clash = 0;
+          for (const i of own) {
+            const p = add(get(B, i), delta);
+            for (const j of placedIdx) {
+              const d = Math.hypot(p[0] - out[3 * j], p[1] - out[3 * j + 1]);
+              if (d < 2.2) clash += (2.2 - d) ** 2;
+            }
+          }
+          // a lánc balra haladjon (ne forduljon vissza)
+          const ccx = ringPts.reduce((m, p) => m + p[0], 0) / ring.length + delta[0];
+          const back = Math.max(0, ccx - (pcx - 2.0));
+          const score = 3 * clash + 3 * (dAc - dMin) + 1.5 * inner + (oTop ? 0 : 0.6) + 0.8 * back
+            + (exo || dA === dB ? 0 : 0.5) + spots[ai][2] + 0.01 * k;
+          if (!best || score < best.score) best = { score, B, pB, delta, dA };
+        });
+      }
+    }
+    for (let i = 0; i < N; i++) {
+      if (!best.pB[i]) continue;
+      put(out, i, add(get(best.B, i), best.delta));
+      placed[i] = 1;
+    }
+    if (!exo) {
+      const mid = lerp3(Cx, get(out, br.aC), 0.5);
+      put(out, br.o, add(mid, [0, best.dA === dB ? dB * 0.9 : 0, 0]));
+    }
+  }
+  checkAll(out, placed, N);
+  relaxRings(out, N, bonds, el, residues.map((x) => x.ring), bridges.map((b) => b.o));
+  centerAll([out], N);
+  return out;
+}

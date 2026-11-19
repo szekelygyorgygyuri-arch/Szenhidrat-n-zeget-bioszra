@@ -6,7 +6,21 @@ megtekintéséhez.
 ## Mit tud?
 
 - **33 monoszacharid** (triózok, tetrózok, pentózok, hexózok, heptózok;
-  aldózok, ketózok, dezoxi- és aminocukrok, uronsavak) és **24 diszacharid**.
+  aldózok, ketózok, dezoxi- és aminocukrok, uronsavak), **24 diszacharid** és
+  **27 poliszacharid**:
+  - glükánok: amilóz, amilopektin, glikogén, cellulóz, dextrán, pullulán,
+    kallóz, laminarin, zab-β-glükán;
+  - fruktánok: inulin, levan;
+  - egyéb homopoliszacharidok: kitin, kitozán, xilán, mannán, pektin,
+    galaktomannán;
+  - heteropoliszacharidok: glükomannán, alginát, agaróz, κ-karragén,
+    hialuronsav, kondroitin-szulfát, dermatán-szulfát, heparin,
+    keratán-szulfát, peptidoglikán.
+- A poliszacharidoknak egy jellemző, 8–19 egységes részlete látszik, valódi
+  térszerkezettel: az amilóz balmenetes spirál, a cellulóz és a kitin
+  egyenes szalag, a xilán háromfogású csavar, az amilopektin és a glikogén
+  elágazó. A „Lánc felépülése” animáció egységenként mutatja a kapcsolódást;
+  ki van írva az ismétlődő egység és a kötések típusa.
 - A bal oldali listában a monoszacharidok szénatomszám szerint növekvő
   sorrendben vannak. A diszacharidok az első egység szerint vannak
   csoportosítva, egyezés esetén a második szerint (pl. *glükóz + glükóz*,
@@ -74,6 +88,18 @@ Egy adott molekula közvetlenül is megnyitható a címben, pl. `#maltoz`,
 `#fruktoz`, `#szacharoz`.
 
 ## Az adatok előállítása
+
+A poliszacharidokat külön szkript készíti (a `data.js` „polys” részét frissíti):
+
+```sh
+python3 tools/generate_polys.py
+```
+
+Minden kötéstípushoz kiszámolja a diszacharid konformereit (célszerkezetnél a
+φ/ψ glikozidos torziókat szisztematikusan is végigpásztázza), ezekből választja
+ki azt, amelyik a természetes hélixet adja (egységenkénti elfordulás és
+emelkedés), majd a láncot ezekkel a lépésekkel felépíti és MMFF94-gyel
+kisimítja.
 
 A `data.js`-t a `tools/generate_data.py` készíti RDKit-tel:
 

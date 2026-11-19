@@ -291,6 +291,16 @@ class Unit:
             self.bonds.append((a, b, o))
 
         hplan = []  # (atom, label, carbon, role)
+        self.lactyl = None
+
+        def sulfo(host, ci):
+            # –SO₃H csoport (szulfát-észter vagy N-szulfát)
+            sa = add("S", f"S{ci}", ci, "Sub")
+            bond(host, sa)
+            for o in (2, 2, 1):
+                oo = add("O", "", ci, "Sub")
+                bond(sa, oo, o)
+            hplan.append((oo, "", ci, "Sub"))
         for i in range(1, n + 1):
             self.C[i] = add("C", f"C{i}", i, "C")
         for i in range(1, n):
@@ -307,6 +317,16 @@ class Unit:
                 if m == "CH3":
                     for s in "abc":
                         hplan.append((c, f"H{i}{s}", i, "HC"))
+                elif m == "anh":
+                    # 3,6-anhidro-híd: a C6 a C3 oxigénjéhez kötődik
+                    hplan.append((c, f"H{i}a", i, "HC"))
+                    hplan.append((c, f"H{i}b", i, "HC"))
+                elif m == "CH2OSO3H":
+                    self.X[i] = add("O", f"O{i}", i, "X")
+                    bond(c, self.X[i])
+                    sulfo(self.X[i], i)
+                    hplan.append((c, f"H{i}a", i, "HC"))
+                    hplan.append((c, f"H{i}b", i, "HC"))
                 elif m == "COOH":
                     self.Xd[i] = add("O", f"O{i}a", i, "Xd")
                     bond(c, self.Xd[i], 2)
@@ -329,6 +349,41 @@ class Unit:
                     hplan.append((self.X[i], f"HN{i}a", i, "HX"))
                     hplan.append((self.X[i], f"HN{i}b", i, "HX"))
                     hplan.append((c, f"H{i}", i, "HC"))
+                elif m == "OSO3H":
+                    self.X[i] = add("O", f"O{i}", i, "X")
+                    bond(c, self.X[i])
+                    sulfo(self.X[i], i)
+                    hplan.append((c, f"H{i}", i, "HC"))
+                elif m == "NHSO3H":
+                    self.X[i] = add("N", f"N{i}", i, "X")
+                    bond(c, self.X[i])
+                    sulfo(self.X[i], i)
+                    hplan.append((self.X[i], f"HN{i}", i, "HX"))
+                    hplan.append((c, f"H{i}", i, "HC"))
+                elif m == "Oanh":
+                    self.X[i] = add("O", f"O{i}", i, "X")
+                    bond(c, self.X[i])
+                    hplan.append((c, f"H{i}", i, "HC"))
+                elif m == "Olactyl":
+                    # 3-O-[(R)-1-karboxietil] (laktil-éter, muraminsav)
+                    xo = self.X[i] = add("O", f"O{i}", i, "X")
+                    bond(c, xo)
+                    ca = add("C", "", i, "Sub")
+                    cm = add("C", "", i, "Sub")
+                    cc = add("C", "", i, "Sub")
+                    od = add("O", "", i, "Sub")
+                    oh = add("O", "", i, "Sub")
+                    bond(xo, ca)
+                    bond(ca, cm)
+                    bond(ca, cc)
+                    bond(cc, od, 2)
+                    bond(cc, oh)
+                    hplan.append((ca, "", i, "Sub"))
+                    for _ in range(3):
+                        hplan.append((cm, "", i, "Sub"))
+                    hplan.append((oh, "", i, "Sub"))
+                    hplan.append((c, f"H{i}", i, "HC"))
+                    self.lactyl = (ca, xo, cc, cm)
                 elif m == "NHAc":
                     nn = self.X[i] = add("N", f"N{i}", i, "X")
                     bond(c, nn)
@@ -355,6 +410,10 @@ class Unit:
                 self.HX.setdefault(ci, h)
             elif role == "HC":
                 self.HC.setdefault(ci, []).append(h)
+            if self.lactyl and host == self.lactyl[0] and len(self.lactyl) == 4:
+                self.lactyl = self.lactyl + (h,)
+        if mods.get(n) == "anh":
+            bond(self.X[3], self.C[n])
         self.open_bonds = list(self.bonds)
 
     # -- gyűrűs forma -------------------------------------------------------
@@ -404,6 +463,11 @@ class Unit:
                   self.X[i]: (sx, 0.0, 0.6),
                   self.HC[i][0]: (-sx, 0.0, 0.6)}
             specs.append((self.C[i], nb))
+        if self.lactyl:
+            # (R)-laktil: a H hátra mutat, O → COOH → CH₃ az óramutató járása szerint
+            ca, xo, cc, cm, h = self.lactyl
+            specs.append((ca, {xo: (0.0, 1.0, 0.33), cc: (0.87, -0.5, 0.33),
+                               cm: (-0.87, -0.5, 0.33), h: (0.0, 0.0, -1.0)}))
         return specs
 
     def anomer_spec(self, ring, anomer, exo=None):
@@ -647,10 +711,10 @@ def formula(els):
     for e in els:
         cnt[e] = cnt.get(e, 0) + 1
     s = ""
-    for e in ("C", "H", "N", "O"):
+    for e in ("C", "H", "N", "O", "S"):
         if e in cnt:
             s += e + (str(cnt[e]) if cnt[e] > 1 else "")
-    mass = sum({"C": 12.011, "H": 1.008, "N": 14.007, "O": 15.999}[e] for e in els)
+    mass = sum({"C": 12.011, "H": 1.008, "N": 14.007, "O": 15.999, "S": 32.06}[e] for e in els)
     return s.translate(SUP), round(mass, 2)
 
 
@@ -1055,6 +1119,14 @@ def main():
     print("Diszacharidok:")
     dis = [build_di(d) for d in DIS]
     data = dict(monos=monos, dis=dis)
+    # a poliszacharidokat a generate_polys.py állítja elő; ha már vannak, megtartjuk
+    try:
+        with open(OUT, encoding="utf-8") as f:
+            old = json.loads(f.read().split("window.SUGAR_DATA = ", 1)[1].rstrip().rstrip(";"))
+        if "polys" in old:
+            data["polys"] = old["polys"]
+    except (OSError, IndexError, ValueError):
+        pass
     js = "/* Automatikusan generált fájl – lásd tools/generate_data.py */\n" \
          "window.SUGAR_DATA = " + json.dumps(data, ensure_ascii=False, separators=(",", ":")) + ";\n"
     with open(OUT, "w", encoding="utf-8") as f:
