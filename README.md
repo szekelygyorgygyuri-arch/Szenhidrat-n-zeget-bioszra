@@ -1,6 +1,6 @@
 # Szénhidrát 3D
 
-Interaktív weboldal mono- és diszacharidok térbeli modelljeinek
+Interaktív weboldal mono-, di- és poliszacharidok térbeli modelljeinek
 megtekintéséhez.
 
 ## Mit tud?
