@@ -1,6 +1,6 @@
 // Szénhidrát 3D – papír (2D) modellek
 // ---------------------------------------------------------------------------
-// A tankönyvi ábrák térbeli megfelelői:
+// A tankönyvi ábrák síkbeli (papírra nyomtatott) megfelelői, térben forgathatóan:
 //   • nyílt lánc  → Fischer-projekció (függőleges szénlánc, C1 felül, a
 //     szubsztituensek vízszintesen jobbra vagy balra)
 //   • gyűrűs forma → Haworth-képlet (vízszintes, szabályos gyűrű, a
@@ -92,28 +92,111 @@ function branch(ctx, S, P, dir) {
 }
 
 // ---- Haworth-képlet -----------------------------------------------------------
+// A Haworth-képlet csúcsai a papíron (x jobbra, y felfelé = a gyűrű hátsó része)
+const SLOTS = {
+  p: [[0, [1.8, 0]], [-60, [0.9, -1.05]], [-120, [-0.9, -1.05]], [180, [-1.8, 0]], [120, [-0.9, 1.05]], [60, [0.9, 1.05]]],
+  f: [[18, [1.65, 0.28]], [-54, [0.88, -0.9]], [-126, [-0.88, -0.9]], [162, [-1.65, 0.28]], [90, [0, 1.0]]],
+};
+function slotXY(type, ang) {
+  const deg = (((ang * 180) / Math.PI) % 360 + 540) % 360 - 180;
+  let best = SLOTS[type][0], bd = 1e9;
+  for (const sl of SLOTS[type]) {
+    const d = Math.abs((((deg - sl[0]) % 360) + 540) % 360 - 180);
+    if (d < bd) { bd = d; best = sl; }
+  }
+  return [best[1][0], best[1][1], 0];
+}
+
 /**
- * Egy gyűrű Haworth-elrendezése. A gyűrű a vízszintes (xz) síkban fekszik,
- * felülről nézve az óramutató járása szerint számozva; a szubsztituensek
- * függőlegesen állnak (fent/lent a 3D szerkezet szerint).
+ * Síkbeli „szétrázás”: az egymásba lógó atomokat a papír síkjában széttolja.
+ * A fixed atomok (gyűrű, glikozidos híd) nem mozdulnak, a vertical atomok
+ * (a gyűrűhöz kötött első szubsztituensek) csak a függőleges vonalukon
+ * csúszhatnak; a kötéshosszak és az eredeti elrendezés rugóként hatnak.
+ */
+export function relaxPlanar(P, idx, bonds, el, fixed, vertical) {
+  const inSet = new Set(idx);
+  const bl = bonds.filter(([i, j]) => inSet.has(i) && inSet.has(j)).map(([i, j]) => [i, j, len(sub(get(P, i), get(P, j)))]);
+  const bonded = new Set(bl.map(([i, j]) => (i < j ? `${i}-${j}` : `${j}-${i}`)));
+  const P0 = Float64Array.from(P);
+  const n = idx.length;
+  const F = new Float64Array(P.length);
+  for (let it = 0; it < 400; it++) {
+    F.fill(0);
+    let worst = 0;
+    for (let a = 0; a < n; a++) {
+      const i = idx[a];
+      for (let b = a + 1; b < n; b++) {
+        const j = idx[b];
+        if (bonded.has(i < j ? `${i}-${j}` : `${j}-${i}`)) continue;
+        const hi = el[i] === "H", hj = el[j] === "H";
+        const dmin = hi && hj ? 0.95 : hi || hj ? 1.08 : 1.3;
+        let dx = P[3 * i] - P[3 * j], dy = P[3 * i + 1] - P[3 * j + 1];
+        let d = Math.hypot(dx, dy);
+        if (d >= dmin) continue;
+        if (d < 1e-4) { dx = ((i * 7 + j * 3) % 5) - 2 || 1; dy = 1; d = Math.hypot(dx, dy); dx /= d; dy /= d; d = 1e-4; } else { dx /= d; dy /= d; }
+        const f = (dmin - d) * 0.7;
+        worst = Math.max(worst, dmin - d);
+        F[3 * i] += dx * f; F[3 * i + 1] += dy * f;
+        F[3 * j] -= dx * f; F[3 * j + 1] -= dy * f;
+      }
+    }
+    for (const [i, j, L] of bl) {
+      const dx = P[3 * i] - P[3 * j], dy = P[3 * i + 1] - P[3 * j + 1];
+      const d = Math.hypot(dx, dy) || 1e-6;
+      const f = (L - d) * 0.5;
+      F[3 * i] += (dx / d) * f; F[3 * i + 1] += (dy / d) * f;
+      F[3 * j] -= (dx / d) * f; F[3 * j + 1] -= (dy / d) * f;
+    }
+    for (const i of idx) {
+      if (fixed.has(i)) continue;
+      F[3 * i] += (P0[3 * i] - P[3 * i]) * 0.015;
+      F[3 * i + 1] += (P0[3 * i + 1] - P[3 * i + 1]) * 0.015;
+      if (!vertical.has(i)) P[3 * i] += F[3 * i] * 0.5;
+      P[3 * i + 1] += F[3 * i + 1] * 0.5;
+    }
+    if (worst < 0.01 && it > 20) break;
+  }
+}
+
+/** A gyűrűk atomjai rögzítettek, a hozzájuk kötött első atomok függőlegesen csúszhatnak. */
+function relaxRings(P, N, bonds, el, rings, extraFixed = []) {
+  const ringSet = new Set(rings.flat());
+  const fixed = new Set([...ringSet, ...extraFixed]);
+  const vertical = new Set();
+  for (const [i, j] of bonds) {
+    if (ringSet.has(i) && !ringSet.has(j)) vertical.add(j);
+    if (ringSet.has(j) && !ringSet.has(i)) vertical.add(i);
+  }
+  for (const f of extraFixed) vertical.delete(f);
+  relaxPlanar(P, [...Array(N).keys()], bonds, el, fixed, vertical);
+}
+
+/**
+ * Egy gyűrű Haworth-képlete, ahogy a tankönyvben nyomtatva látszik: minden
+ * atom a képernyő (xy) síkjában van. A gyűrű lapított sokszög: elöl (lent)
+ * a C2–C3 él, hátul (fent) a gyűrű-O; felülről nézve az óramutató járása
+ * szerint számozódik. A szubsztituensek függőleges vonalakon állnak (fent/lent
+ * a 3D szerkezet szerint); a gyűrű belseje felé mutatók rövidebbek, hogy ne
+ * takarják egymást. Az OH hidrogénje vízszintesen áll, mint a rajzon a „HO”.
  * Visszaadja a más egységbe vezető kötések (glikozidos híd) irányát is.
  */
 export function haworthLayout({ X3, el, adj, ring, ringType, inUnit, out, placed, origin = [0, 0, 0], yaw = 0 }) {
   const base = ringType === "p" ? PYR : FUR;
-  const R = ringType === "p" ? 1.5 : 1.3;
   const c3 = centroid(X3, ring);
   let nrm = [0, 0, 0];
   for (let j = 0; j < ring.length; j++) {
     nrm = add(nrm, cross(sub(get(X3, ring[j]), c3), sub(get(X3, ring[(j + 1) % ring.length]), c3)));
   }
   const up3 = unit(mul(nrm, -1));
-  const info = { bridge: [], up3, center: origin, R };
-  const radial = [];
+  const angs = ring.map((_, j) => ((base[j] + yaw) * Math.PI) / 180);
+  // a képernyő „jobbra” irányának megfelelője a 3D gyűrűben (a sorrendekhez)
+  let east3 = [0, 0, 0];
+  ring.forEach((a, j) => { east3 = add(east3, mul(unit(perp(sub(get(X3, a), c3), up3)), Math.cos(angs[j]))); });
+  east3 = unit(east3);
+  const info = { bridge: [], up3, center: origin };
+  const slots = ring.map((_, j) => slotXY(ringType, angs[j]));
   ring.forEach((a, j) => {
-    const ang = ((base[j] + yaw) * Math.PI) / 180;
-    const r = [Math.cos(ang), 0, -Math.sin(ang)];
-    radial.push(r);
-    put(out, a, add(origin, mul(r, R)));
+    put(out, a, add(origin, slots[j]));
     placed[a] = 1;
   });
   const todo = [];
@@ -122,21 +205,24 @@ export function haworthLayout({ X3, el, adj, ring, ringType, inUnit, out, placed
     if (!exo.length) return;
     const pr = exo.map((c) => dot(sub(get(X3, c), get(X3, a)), up3));
     const ord = exo.map((_, k) => k).sort((p, q) => pr[q] - pr[p]);
-    const r3 = unit(perp(sub(get(X3, a), c3), up3));
-    const r = radial[j];
-    const t = cross(UPV, r);
-    const ctx = {
-      X3, el, adj, out, placed, inUnit, up3,
-      side: t, side3: cross(up3, r3), hdir: r,
-      sideDir: (s) => unit(add(mul(t, s), mul(r, 0.7))),
-    };
+    const [vx, vy] = slots[j];
+    const outward = [vx >= 0 ? 1 : -1, 0, 0];
     ord.forEach((k, n) => {
       const c = exo[k];
       const d = exo.length === 1 ? (pr[k] >= 0 ? UPV : DOWNV) : n === 0 ? UPV : DOWNV;
       if (!inUnit(c)) { info.bridge.push({ from: a, atom: c, dir: d[1] }); return; }
       if (placed[c]) return;
-      put(out, c, add(get(out, a), mul(d, el[c] === "H" ? LH : LX)));
+      // befelé mutat: hátsó atomnál lefelé, elülsőnél felfelé
+      const inner = (vy > 0.5 && d[1] < 0) || (vy < -0.5 && d[1] > 0);
+      const L = el[c] === "H" ? (inner ? 0.55 : 0.85) : inner ? 0.8 : 1.15;
+      put(out, c, add(get(out, a), mul(d, L)));
       placed[c] = 1;
+      const ctx = {
+        X3, el, adj, out, placed, inUnit, up3,
+        side: [1, 0, 0], side3: east3,
+        hdir: outward,
+        sideDir: (sg) => [sg, 0, 0],
+      };
       todo.push([ctx, c, a, d]);
     });
   });
@@ -289,7 +375,9 @@ function closureBonds(bo, br, tH) {
 function twistParams(K3, adjOpen, Ck, Ckm1, Ok, sideOk, allow) {
   // a C_k szubsztituensei (a nyílt lánc gráfjában), C_(k−1) felé nem megyünk
   const subtree = subtreeFrom(adjOpen, Ck, Ckm1, allow);
-  const axis = unit(sub(get(K3, Ck), get(K3, Ckm1)));
+  // síkbeli modell: a C_k körüli elfordulás a papír síkjában történik
+  const axis = [0, 0, 1];
+  void Ckm1;
   const pivot = get(K3, Ck);
   let theta = 0;
   if (sideOk !== 0) theta = signedAngle(sub(get(K3, Ok), pivot), [0, sideOk, 0], axis);
@@ -310,6 +398,7 @@ export function makePaperClosure(o) {
   const K3 = new Float64Array(N * 3), p3 = new Uint8Array(N);
   haworthLayout({ X3: X3r, el, adj: adjR, ring, ringType, inUnit: all, out: K3, placed: p3 });
   checkAll(K3, p3, N);
+  relaxRings(K3, N, br, el, [ring]);
   const F = new Float64Array(N * 3), pF = new Uint8Array(N);
   fischerLayout({ X3: X3o, el, adj: adjO, carbons, inUnit: all, out: F, placed: pF });
   checkAll(F, pF, N);
@@ -325,7 +414,7 @@ export function makePaperClosure(o) {
   const sideOk = Math.abs(v[0]) > Math.abs(v[1]) ? (v[0] > 0 ? -1 : 1) : 0;
   const tw = twistParams(K3, adjO, Ck, Ckm1, Ok, sideOk, all);
   const c3 = centroid(K3, ring);
-  const tHk3 = add(get(K3, Ok), mul(unit(perp(sub(get(K3, Ok), c3), UPV)), LH));
+  const tHk3 = add(get(K3, Ok), mul(unit(sub(get(K3, Ok), c3)), LH));
   const frame = closureFrames({ N, K0, K1, K3, sub: tw.subtree, axis: tw.axis, pivot: tw.pivot, theta: tw.theta, tH, tHk3, ringForm: ring });
   return { N, frame, bonds: closureBonds(bo, br, tH), atomAlpha: () => 1, twisted: Math.abs(tw.theta) > 0.05, paper: true };
 }
@@ -355,39 +444,86 @@ const ringTypeOf = (ring) => (ring.length === 6 ? "p" : "f");
  * jobbra úgy elforgatva (függőleges tengely körül), hogy a kapcsolódó
  * szénatomja A felé nézzen. A glikozidos O a két szénatom között van.
  */
+function flipUnit(P, placed, sx, sy) {
+  for (let i = 0; i < placed.length; i++) {
+    if (!placed[i]) continue;
+    P[3 * i] *= sx;
+    P[3 * i + 1] *= sy;
+  }
+}
+
+/**
+ * Két egység Haworth-képlete egymás mellett: az első (A) balra, a második (B)
+ * jobbra. B állását (a gyűrű elforgatása a saját síkjában, ill. a papírlap
+ * megfordítása függőleges vagy vízszintes tengely körül – mindkettő valódi
+ * forgatás, a térállás nem változik) úgy választjuk, hogy a kapcsolódó
+ * szénatom A felé nézzen, a gyűrű-O lehetőleg felül legyen, és a két egység
+ * ne takarja egymást. A glikozidos O a két szénatom között van.
+ */
 function joinedLayout({ X3, el, adj, side, ringA, ringB, aCA, Ox, Cx, out, placed, joinBridge = true }) {
   const inA = (i) => side[i] === 0, inB = (i) => side[i] === 1;
   const infoA = haworthLayout({ X3, el, adj, ring: ringA, ringType: ringTypeOf(ringA), inUnit: inA, out, placed });
-  const base = ringTypeOf(ringB) === "p" ? PYR : FUR;
-  let j = ringB.indexOf(Cx);
-  if (j < 0) j = ringB.indexOf(adj[Cx].find((n) => ringB.includes(n)));
-  const yaw = 180 - base[j];
-  const tmpPlaced = new Uint8Array(placed.length);
-  const B = new Float64Array(out.length);
-  haworthLayout({ X3, el, adj, ring: ringB, ringType: ringTypeOf(ringB), inUnit: inB, out: B, placed: tmpPlaced, yaw });
-  const PA = get(out, aCA);
-  const bA0 = infoA.bridge.find((b) => b.from === aCA);
-  const dA0 = bA0 ? bA0.dir : -1;
+  const typeB = ringTypeOf(ringB);
+  const step = typeB === "p" ? 60 : 72;
+  const nSlots = typeB === "p" ? 6 : 5;
   const exoCx = !ringB.includes(Cx);
-  // gyűrűatomhoz kapcsolódó híd: a két szénatom egy magasságban, köztük az O;
-  // gyűrűn kívüli (pl. C6) kapcsolódás: B a saját O-jánál fogva lóg A-ról
-  const delta = exoCx
-    ? sub(add(PA, [1.2, 0.8 * dA0, 0]), get(B, Ox))
-    : sub(add(PA, [2.6, 0, 0]), get(B, Cx));
+  const hang = exoCx ? adj[Cx].find((n) => ringB.includes(n)) : Cx;
+  const PA = get(out, aCA);
+  const bA = infoA.bridge.find((b) => b.from === aCA);
+  const dA = bA ? bA.dir : -1;
+  const Aidx = [];
+  for (let i = 0; i < placed.length; i++) if (placed[i]) Aidx.push(i);
+  let best = null;
+  for (let k = 0; k < nSlots; k++) {
+    const yaw = k * step;
+    const B0 = new Float64Array(out.length), pB = new Uint8Array(placed.length);
+    haworthLayout({ X3, el, adj, ring: ringB, ringType: typeB, inUnit: inB, out: B0, placed: pB, yaw });
+    for (const sx of [1, -1]) for (const sy of [1, -1]) {
+      const B = Float64Array.from(B0);
+      flipUnit(B, pB, sx, sy);
+      const delta = exoCx
+        ? sub(add(PA, [1.2, 0.8 * dA, 0]), get(B, Ox))
+        : sub(add(PA, [2.6, 0, 0]), get(B, Cx));
+      const xs = ringB.map((i) => get(B, i)[0]);
+      const left = get(B, hang)[0] - Math.min(...xs);
+      const oTop = get(B, ringB[ringB.length - 1])[1] >= Math.max(...ringB.map((i) => get(B, i)[1])) - 0.05;
+      const dB = Math.sign(get(B, Ox)[1] - get(B, Cx)[1]) || -1;
+      let clash = 0;
+      for (let i = 0; i < pB.length; i++) {
+        if (!pB[i] || i === Ox) continue;
+        const pi = add(get(B, i), delta);
+        for (const a of Aidx) {
+          const d = len(sub(pi, get(out, a)));
+          if (d < 2.0) clash += (2.0 - d) ** 2;
+        }
+      }
+      // a gyűrű belsejébe lógó szénlánc (ficak, kamuficak) csúnya: kerüljük
+      let inner = 0;
+      const cy = ringB.reduce((m, i) => m + get(B, i)[1], 0) / ringB.length;
+      for (const r of ringB) {
+        const ry = get(B, r)[1] - cy;
+        for (const c of adj[r]) {
+          if (ringB.includes(c) || !inB(c) || el[c] !== "C") continue;
+          const dy = get(B, c)[1] - get(B, r)[1];
+          if ((ry > 0.5 && dy < 0) || (ry < -0.5 && dy > 0)) inner++;
+        }
+      }
+      const score = 4 * left + (oTop ? 0 : 0.8) + 1.5 * inner + (exoCx || dB === dA ? 0 : 0.8) + clash + 0.01 * k;
+      if (!best || score < best.score) best = { score, B, pB, delta, yaw, sx, sy, dB };
+    }
+  }
+  const { B, pB, delta } = best;
   for (let i = 0; i < placed.length; i++) {
-    if (!tmpPlaced[i]) continue;
+    if (!pB[i]) continue;
     put(out, i, add(get(B, i), delta));
     placed[i] = 1;
   }
-  const bA = infoA.bridge.find((b) => b.from === aCA);
-  const dA = bA ? bA.dir : -1;
-  const dB = Math.sign(get(out, Ox)[1] - get(out, Cx)[1]) || -1;
   if (joinBridge && !exoCx) {
     const mid = lerp3(PA, get(out, Cx), 0.5);
-    put(out, Ox, add(mid, [0, dA === dB ? dA * 0.9 : 0, 0]));
+    put(out, Ox, add(mid, [0, dA === best.dB ? dA * 0.9 : 0, 0]));
     placed[Ox] = 1;
   }
-  return { dA, dB, yaw, delta };
+  return { dA, dB: best.dB, yaw: best.yaw, sx: best.sx, sy: best.sy, delta };
 }
 
 function centerAll(arrs, N) {
@@ -415,6 +551,7 @@ export function makePaperClosureDi(o) {
   const K3 = new Float64Array(N * 3), p3 = new Uint8Array(N);
   joinedLayout({ X3: X3r, el, adj: adjR, side, ringA, ringB, aCA, Ox, Cx, out: K3, placed: p3 });
   checkAll(K3, p3, N);
+  relaxRings(K3, N, br, el, [ringA, ringB], [Ox]);
   // B Fischer-projekcióban; a két lehetséges állás (álló / 180°-kal elforgatott)
   // közül azt választjuk, amelyik kevésbé ütközik A-val.
   const carbons = unitCarbons(lab, bb, side, 1);
@@ -453,7 +590,7 @@ export function makePaperClosureDi(o) {
   if (twistParams(K3, adjO, Ck, Ckm1, Ok, 0, inB).subtree.includes(Ox)) sideOk = 0;
   const tw2 = twistParams(K3, adjO, Ck, Ckm1, Ok, sideOk, inB);
   const c3b = centroid(K3, ringB);
-  const tHk3b = add(get(K3, Ok), mul(unit(perp(sub(get(K3, Ok), c3b), UPV)), LH));
+  const tHk3b = add(get(K3, Ok), mul(unit(sub(get(K3, Ok), c3b)), LH));
   const frame = closureFrames({ N, K0, K1: null, K3, sub: tw2.subtree, axis: tw2.axis, pivot: tw2.pivot, theta: tw2.theta, tH, tHk3: tHk3b, ringForm: ringB });
   return { N, frame, bonds: closureBonds(bo, br, tH), atomAlpha: () => 1, twisted: Math.abs(tw2.theta) > 0.05, paper: true };
 }
@@ -468,6 +605,7 @@ export function makePaperDiStatic(o) {
   const K3 = new Float64Array(N * 3), p3 = new Uint8Array(N);
   joinedLayout({ X3: X3r, el, adj: adjR, side, ringA, ringB, aCA, Ox, Cx, out: K3, placed: p3 });
   checkAll(K3, p3, N);
+  relaxRings(K3, N, br, el, [ringA, ringB], [Ox]);
   centerAll([K3], N);
   return {
     N,
@@ -492,6 +630,7 @@ export function paperCondensationInput(o) {
   const fin = new Float64Array(N * 3), pf = new Uint8Array(N);
   const J = joinedLayout({ X3: X3r, el, adj: adjR, side, ringA, ringB, aCA, Ox, Cx, out: fin, placed: pf });
   checkAll(fin, pf, N);
+  relaxRings(fin, N, b, el, [ringA, ringB], [Ox]);
   // különálló egységek: a híd helyett a saját OH-csoportjaik
   const bondsFree = b.filter(([i, j]) => !((i === aCA && j === Ox) || (i === Ox && j === aCA)))
     .concat(gBonds.filter((g) => g[2] !== 2).map(([i, j]) => [i, j, 1]));
@@ -501,14 +640,16 @@ export function paperCondensationInput(o) {
   haworthLayout({ X3: X3free, el, adj: adjF, ring: ringA, ringType: ringTypeOf(ringA), inUnit: inA, out: free, placed: pfr });
   const Bf = new Float64Array(M * 3), pB = new Uint8Array(M);
   haworthLayout({ X3: X3free, el, adj: adjF, ring: ringB, ringType: ringTypeOf(ringB), inUnit: inB, out: Bf, placed: pB, yaw: J.yaw });
+  flipUnit(Bf, pB, J.sx, J.sy);
   for (let i = 0; i < M; i++) if (pB[i]) { put(free, i, add(get(Bf, i), J.delta)); pfr[i] = 1; }
   checkAll(free, pfr, M);
+  relaxRings(free, M, bondsFree, el, [ringA, ringB]);
   // a kilépő víz útja: a glikozidos O irányában távolodik
   const dW = J.dA || -1;
   const ob = get(fin, Ox);
   const water = (c) => [c, add(c, [0.76, 0.59 * dW, 0]), add(c, [-0.76, 0.59 * dW, 0])];
-  const gMid = water(add(ob, [0, 2.3 * dW, 0.7]));
-  const gEnd = water(add(ob, [0, 6.5 * dW, 2.8]));
+  const gMid = water(add(ob, [0, 2.3 * dW, 0]));
+  const gEnd = water(add(ob, [0, 6.5 * dW, 0]));
   // középre igazítás (fin alapján)
   const c = centroid(fin, [...Array(N).keys()]);
   const shift = (P, n) => { for (let i = 0; i < n; i++) put(P, i, sub(get(P, i), c)); };

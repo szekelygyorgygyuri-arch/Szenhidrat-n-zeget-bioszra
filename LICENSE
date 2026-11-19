@@ -1,0 +1,28 @@
+Copyright (c) 2026 szekelygyorgygyuri-arch
+Minden jog fenntartva. / All rights reserved.
+
+A szerző előzetes írásos engedélye nélkül tilos ezt a szoftvert (a
+forráskódot, az adatfájlokat és a dokumentációt) részben vagy egészben
+másolni, módosítani, terjeszteni, közzétenni vagy más módon felhasználni,
+kivéve a személyes megtekintést és használatot a közzétett weboldalon.
+
+No part of this software (source code, data files and documentation) may
+be copied, modified, distributed, published or otherwise used, in whole
+or in part, without the prior written permission of the author, except
+for personal viewing and use of the published website.
+
+Külső összetevők / Third-party components
+-----------------------------------------
+Az alábbiakat a weboldal futás közben tölti be, és saját licencük alá
+tartoznak; ez a licenc nem vonatkozik rájuk:
+The following are loaded at runtime and remain under their own licenses;
+this notice does not apply to them:
+
+- three.js (MIT License) – https://threejs.org
+- Inter, Sora, JetBrains Mono betűtípusok / fonts (SIL Open Font License)
+  – Google Fonts
+
+A 3D koordináták előállításához az RDKit-et (BSD License) használtuk
+(tools/generate_data.py); az RDKit nem része ennek a csomagnak.
+The RDKit (BSD License) was used to generate the 3D coordinates
+(tools/generate_data.py); it is not part of this package.

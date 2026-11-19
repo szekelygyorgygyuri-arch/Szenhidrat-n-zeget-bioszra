@@ -30,6 +30,12 @@
   --holo: #0f9fb0;
   --holo-ink: #0b6f7c;
   --holo-soft: #dff4f6;
+  --star: #e3a008;
+  --star-ink: #9a6b00;
+  --star-soft: #fbf0d0;
+  --bridge: #7b5cff;
+  --good: #1f9d55; --good-ink: #146c3a; --good-soft: #e1f5e8;
+  --bad: #d64545; --bad-ink: #a12d2d; --bad-soft: #fbe6e6;
   --shadow: 0 1px 2px rgba(19, 30, 52, .06), 0 10px 30px rgba(19, 30, 52, .07);
   --radius: 14px;
   --font-display: "Sora", "Inter", system-ui, sans-serif;
@@ -41,7 +47,8 @@
     --bg: #090d14; --surface: #10161f; --raised: #161e2b; --ink: #e5eaf2; --muted: #8f9aae;
     --faint: #687387; --line: #222b3a; --accent: #6aa6ff; --accent-ink: #08111f; --accent-soft: #172b47;
     --stage-in: #18212f; --stage-out: #080b11; --ring-fill: #7fb0ff;
-    --holo: #4fd6e4; --holo-ink: #8ae8f1; --holo-soft: #10333a;
+    --holo: #4fd6e4; --holo-ink: #8ae8f1; --holo-soft: #10333a; --star: #f2c14e; --star-ink: #f2c14e; --star-soft: #3a2f12; --bridge: #a08bff;
+    --good: #3ccf7a; --good-ink: #8be6b0; --good-soft: #12301f; --bad: #f07070; --bad-ink: #f6a7a7; --bad-soft: #3a1717;
     --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 12px 32px rgba(0, 0, 0, .3);
     color-scheme: dark;
   }
@@ -50,7 +57,8 @@
   --bg: #090d14; --surface: #10161f; --raised: #161e2b; --ink: #e5eaf2; --muted: #8f9aae;
   --faint: #687387; --line: #222b3a; --accent: #6aa6ff; --accent-ink: #08111f; --accent-soft: #172b47;
   --stage-in: #18212f; --stage-out: #080b11; --ring-fill: #7fb0ff;
-  --holo: #4fd6e4; --holo-ink: #8ae8f1; --holo-soft: #10333a;
+  --holo: #4fd6e4; --holo-ink: #8ae8f1; --holo-soft: #10333a; --star: #f2c14e; --star-ink: #f2c14e; --star-soft: #3a2f12; --bridge: #a08bff;
+    --good: #3ccf7a; --good-ink: #8be6b0; --good-soft: #12301f; --bad: #f07070; --bad-ink: #f6a7a7; --bad-soft: #3a1717;
   --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 12px 32px rgba(0, 0, 0, .3);
   color-scheme: dark;
 }
@@ -95,7 +103,7 @@ button { cursor: pointer; }
 .brand h2 { margin: 0; font: 600 16px/1.2 var(--font-display); letter-spacing: -.01em; }
 .brand p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
 .search { padding: 0 12px 10px; position: relative; }
-.search svg { position: absolute; left: 22px; top: 9px; color: var(--faint); pointer-events: none; }
+.search > svg { position: absolute; left: 22px; top: 9px; color: var(--faint); pointer-events: none; }
 .search input {
   width: 100%; padding: 7px 10px 7px 32px; border-radius: 9px;
   border: 1px solid var(--line); background: var(--raised);
@@ -267,6 +275,55 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 50%; }
 
 .backdrop { display: none; }
 
+/* csillagozás */
+.search input { padding-right: 40px; }
+.star-filter {
+  position: absolute; right: 18px; top: 3px; width: 30px; height: 28px; border-radius: 7px; border: 0;
+  background: transparent; display: grid; place-items: center; color: var(--faint);
+}
+.star-filter[aria-pressed="true"] { color: var(--star); background: var(--star-soft); }
+.st { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+[aria-pressed="true"] > .st { fill: currentColor; }
+.items li { display: flex; align-items: center; gap: 2px; }
+.items li .item { flex: 1; min-width: 0; }
+.star {
+  flex: none; width: 28px; height: 28px; border: 0; border-radius: 7px; background: transparent;
+  display: grid; place-items: center; color: var(--line); opacity: .9;
+}
+.star:hover { color: var(--faint); }
+.star[aria-pressed="true"] { color: var(--star); }
+details.fav > summary { color: var(--star-ink); }
+.legal { padding: 8px 16px 12px; font-size: 11px; color: var(--faint); border-top: 1px solid var(--line); }
+
+/* glikozidos kötés */
+.bond-line { margin: 8px 0 0; max-width: 72ch; font-size: 13px; color: var(--ink); }
+.chip.bond { color: var(--ink); border-color: color-mix(in srgb, var(--bridge) 55%, var(--line)); }
+.lbl.link { color: var(--ink); font-weight: 600; border: 1px solid var(--bridge); background: var(--raised); }
+
+/* mód: nézegető / tippelő */
+.seg.mode { width: auto; flex: none; align-self: flex-start; }
+.seg.mode button { padding: 6px 14px; }
+.quiz { flex: 1; min-width: 0; display: grid; gap: 8px; }
+.quiz h1 { font-size: 22px; }
+.quiz-top { display: flex; align-items: center; gap: 10px; }
+.score { margin-left: auto; font: 500 12px var(--font-mono); color: var(--muted); }
+.quiz-pool { margin: 0; font-size: 12px; color: var(--muted); }
+.quiz-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.opt {
+  border: 1px solid var(--line); background: var(--raised); border-radius: 10px; padding: 9px 12px;
+  font-weight: 500; text-align: left; display: grid; gap: 1px;
+}
+.opt small { font-weight: 400; color: var(--faint); font-size: 11.5px; }
+.opt:hover:not(:disabled) { border-color: var(--accent); }
+.opt:disabled { cursor: default; }
+.opt.ok { border-color: var(--good); background: var(--good-soft); color: var(--good-ink); }
+.opt.bad { border-color: var(--bad); background: var(--bad-soft); color: var(--bad-ink); }
+.quiz-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-height: 34px; }
+.quiz-msg { margin: 0; flex: 1; min-width: 200px; font-size: 13px; }
+.quiz-msg b { font-weight: 600; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.app.quiz-mode .title-block.hidden-q { display: none; }
+
 /* nézetváltó és hologram */
 .quick {
   position: absolute; left: 12px; bottom: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
@@ -309,6 +366,16 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 50%; }
   .backdrop.show { display: block; }
   .stage-head { padding: 10px 12px 8px; flex-wrap: wrap; }
   .title-block { order: 3; flex-basis: 100%; }
+  .seg.mode { order: 2; flex-basis: 100%; }
+  .seg.mode button { flex: 1; }
+  .quiz { order: 4; flex-basis: 100%; }
+  .quiz-opts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .quiz { gap: 6px; }
+  .quiz h1 { font-size: 17px; }
+  .quiz-pool, .opt small { display: none; }
+  .opt { padding: 7px 10px; font-size: 13px; }
+  .quiz-msg { font-size: 12px; min-width: 0; }
+  .quiz-foot .btn { padding: 6px 10px; }
   .drawer-btn.right { margin-left: auto; }
   h1 { font-size: 20px; }
   .desc { display: none; }
@@ -344,8 +411,10 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 50%; }
     <div class="search">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
       <input id="search" type="search" placeholder="Keresés név alapján…" autocomplete="off" aria-label="Keresés">
+      <button type="button" class="star-filter" id="favFirst" aria-pressed="false" title="Csillagozottak előre"><svg class="st" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.6 5.5 6 .8-4.4 4.1 1.1 5.9L12 16.6l-5.3 2.9 1.1-5.9L3.4 9.5l6-.8z"/></svg></button>
     </div>
     <nav class="scroll" id="tree"></nav>
+    <footer class="legal">© 2026 szekelygyorgygyuri-arch · Minden jog fenntartva</footer>
   </aside>
 
   <main class="panel stage">
@@ -359,8 +428,26 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 50%; }
         <div class="title-row"><h1 id="title">Glükóz</h1><span class="alt" id="alt"></span></div>
         <div class="state-name" id="stateName"></div>
         <div class="chips" id="chips"></div>
+        <p class="bond-line" id="bondLine" hidden></p>
         <p class="desc" id="desc"></p>
       </div>
+      <div class="seg mode" id="segMode" role="group" aria-label="Mód">
+        <button type="button" data-v="view" aria-pressed="true">Nézegető</button>
+        <button type="button" data-v="quiz" aria-pressed="false">Tippelő</button>
+      </div>
+      <section class="quiz" id="quiz" hidden aria-live="polite">
+        <div class="quiz-top">
+          <span class="eyebrow">Tippelő</span>
+          <span class="score" id="qScore"></span>
+        </div>
+        <h1>Melyik molekula ez?</h1>
+        <p class="quiz-pool" id="qPool"></p>
+        <div class="quiz-opts" id="qOpts"></div>
+        <div class="quiz-foot">
+          <p class="quiz-msg" id="qMsg"></p>
+          <button type="button" class="btn primary" id="qNext">Következő molekula</button>
+        </div>
+      </section>
       <button class="drawer-btn right" id="openRight" type="button">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
         Beállítások
@@ -415,7 +502,7 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 50%; }
           <button type="button" data-v="3d">3D modell</button>
           <button type="button" data-v="paper">Papír (2D)</button>
         </div>
-        <p class="hint">A papírnézet a tankönyvi ábrákat követi: a nyílt lánc Fischer-projekcióban, a gyűrű Haworth-képletben látszik, de ugyanúgy forgatható és színezhető.</p>
+        <p class="hint">A papírnézet úgy mutatja a molekulát, mint a nyomtatott tankönyv: egy síkban, a nyílt láncot Fischer-projekcióban, a gyűrűt Haworth-képletben. A lap ugyanúgy forgatható és színezhető.</p>
       </section>
 
       <section class="sec" aria-labelledby="h-holo">

@@ -30,14 +30,23 @@ megtekintéséhez.
   atomszínek, D/L konfiguráció, piranóz/furanóz, α/β anomer.
 - Gyűrűs formában kiírja, hogy a glikozidos OH és a ficak a gyűrű síkja
   felett vagy alatt áll (azonos vagy ellentétes oldalon).
-- **Papír (2D) nézet:** a tankönyvi ábrák térben. A nyílt lánc
-  **Fischer-projekcióban**, a gyűrűs forma **Haworth-képletben** látszik:
-  egy síkban fekvő, de forgatható modellként, ugyanazokkal a színekkel és
-  beállításokkal. Az animáció a tankönyvi átalakítást mutatja:
+- **Papír (2D) nézet:** a tankönyvi ábrák, ahogy kinyomtatva látszanak. A
+  nyílt lánc **Fischer-projekcióban**, a gyűrűs forma **Haworth-képletben**
+  látszik. Minden atom egy síkban van (mint egy papírlap), de a lap térben
+  forgatható; ugyanazok a színek és beállítások érvényesek. Az animáció a tankönyvi átalakítást mutatja:
   1. a Fischer-projekció elforgatása,
   2. a lánc gyűrűvé hajlítása,
   3. elfordulás a gyűrű-O-t hordozó szénatom körül,
   4. a gyűrűzáródás.
+- **Glikozidos kötés:** diszacharidoknál ki van írva a kötés típusa (α vagy β)
+  és a kapcsolódó szénatomok (pl. α(1→4): az első egység C1 és a második
+  egység C4′ atomja között); a 3D képen a híd-O mellett is látszik.
+- **Csillagozás:** a lista elemei csillaggal megjelölhetők. A kereső
+  melletti csillaggal a csillagozott molekulák a lista elejére kerülnek.
+- **Tippelő (gyakorlás):** fent átkapcsolható. Véletlenszerűen ad egy
+  molekulát a csillagozottak közül (ha nincs legalább kettő, az összesből), és
+  ki kell választani, melyik az. Minden nézet és beállítás itt is használható;
+  a pontszámot a böngésző megjegyzi.
 - **Hologram:** a másik modell áttetsző rávetítése ugyanazokkal a színekkel.
   2D nézetben a valódi térbeli alakot, 3D nézetben a papírmodellt mutatja.
   A hologramon külön ki/be kapcsolható a C-váz, az OH-csoportok, a
@@ -87,3 +96,9 @@ python3 tools/generate_data.py
   Fischer-projekció jobb/bal és a Haworth-képlet fent/lent irányai a valódi
   térállásból adódnak. A hologramot merev illesztés (Horn-módszer) teszi
   pontosan a fő modellre.
+
+## Licenc
+
+© 2026 szekelygyorgygyuri-arch. Minden jog fenntartva (All rights reserved).
+Részletek: [LICENSE](LICENSE). A külső összetevők (three.js, betűtípusok) a
+saját licencük alá tartoznak.

@@ -54,7 +54,7 @@ const DEFAULTS = {
   vis: Object.fromEntries(GROUPS.map((g) => [g.key, true])),
   showH: true, showOH: true, labels: true, ringFill: false, hlOpen: true,
   style: "bs", el: { ...EL_DEFAULT }, autoRotate: false, speed: 1,
-  view: "3d", holo: false, holoOpacity: 32,
+  view: "3d", holo: false, holoOpacity: 32, fav: [], favFirst: false, quiz: { ok: 0, total: 0 },
   holoParts: { C: true, OH: true, H: true, ficak: true, kamu: true },
 };
 const HOLO_PARTS = [
@@ -464,6 +464,13 @@ function buildLabels() {
   $("#labels").innerHTML = "";
   labelEls = [];
   const m = model;
+  if (st.di && (m.groups.bridge || []).length) {
+    const el = document.createElement("span");
+    el.className = "lbl link";
+    el.textContent = st.rec.link;
+    $("#labels").appendChild(el);
+    labelEls.push({ i: m.groups.bridge[0], el, link: true });
+  }
   const ringO = new Set(m.groups.ringO || []);
   const box = $("#labels");
   for (let i = 0; i < m.N; i++) {
@@ -480,8 +487,8 @@ let labelEls = [];
 function updateLabels() {
   const w = viewport.clientWidth, h = viewport.clientHeight;
   const show = S.labels;
-  for (const { i, el } of labelEls) {
-    if (!show || !mainLayer.vis[i] || mainLayer.alpha[i] < 0.3) { el.hidden = true; continue; }
+  for (const { i, el, link } of labelEls) {
+    if (!show || !mainLayer.vis[i] || mainLayer.alpha[i] < 0.3 || (link && (quizHidden() || st.t < 0.6))) { el.hidden = true; continue; }
     vA.set(P[3 * i], P[3 * i + 1], P[3 * i + 2]).project(camera);
     if (vA.z > 1) { el.hidden = true; continue; }
     el.hidden = false;
@@ -504,7 +511,8 @@ function fitCamera() {
       d = Math.max(d, x / th + z, y / tv + z);
     }
   }
-  const dir = new THREE.Vector3(0, 0.36, 1).normalize();
+  // a papírmodellt szemből nézzük, mint egy kinyomtatott oldalt
+  const dir = model.paper ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 0.36, 1).normalize();
   camera.position.copy(dir.multiplyScalar(d * 1.04));
   controls.target.set(0, 0, 0);
   camera.near = 0.1;
@@ -525,6 +533,16 @@ new ResizeObserver(resize).observe(viewport);
 // ---------------------------------------------------------------------------
 const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
+const STAR_SVG = `<svg class="st" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.6 5.5 6 .8-4.4 4.1 1.1 5.9L12 16.6l-5.3 2.9 1.1-5.9L3.4 9.5l6-.8z"/></svg>`;
+const isFav = (id) => S.fav.includes(id);
+const ALL_IDS = [...DATA.monos.map((m) => m.id), ...DATA.dis.map((d) => d.id)];
+const recOf = (id) => MONO.get(id) || DI.get(id);
+// Diszacharidok: az 1. egység szerint, egyezés esetén a 2. szerint (mint a vezeték- és utónév)
+const linkPos = (d) => +((d.link.match(/[→↔](\d)/) || [0, 9])[1]);
+const DIS_SORTED = [...DATA.dis].sort((a, b) =>
+  MONO_IDX.get(a.A) - MONO_IDX.get(b.A) || MONO_IDX.get(a.B) - MONO_IDX.get(b.B) ||
+  linkPos(a) - linkPos(b) || a.link.localeCompare(b.link));
+
 function itemButton(id, name, meta, metaMono, search) {
   const li = document.createElement("li");
   const b = document.createElement("button");
@@ -535,71 +553,88 @@ function itemButton(id, name, meta, metaMono, search) {
   b.innerHTML = `<span class="nm"></span><span class="meta${metaMono ? " mono" : ""}"></span>`;
   b.querySelector(".nm").textContent = name;
   b.querySelector(".meta").textContent = meta;
-  li.appendChild(b);
+  const s = document.createElement("button");
+  s.type = "button";
+  s.className = "star";
+  s.dataset.star = id;
+  s.setAttribute("aria-pressed", String(isFav(id)));
+  s.setAttribute("aria-label", `${name} csillagozása`);
+  s.title = "Csillagozás";
+  s.innerHTML = STAR_SVG;
+  li.append(b, s);
   return li;
 }
+const monoItem = (m) => itemButton(m.id, m.name, m.alt || m.formula, !m.alt, `${m.name} ${m.alt} ${m.id}`);
+const diItem = (d) => itemButton(d.id, d.name, d.link, true, `${d.name} ${d.alt} ${d.id} ${unitName(d.A)} ${unitName(d.B)}`);
 const chev = `<svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>`;
-function details(cls, title, extra, open) {
+function details(cls, title, extra, open, key) {
   const d = document.createElement("details");
   d.className = `grp ${cls}`;
   d.open = open;
+  d.dataset.key = key;
   d.innerHTML = `<summary>${chev}<span></span>${extra || ""}</summary>`;
   d.querySelector("summary span").textContent = title;
   return d;
 }
+function subList(parent, title, items) {
+  const h = document.createElement("div");
+  h.className = "subhead";
+  h.textContent = title;
+  const ul = document.createElement("ul");
+  ul.className = "items";
+  for (const it of items) ul.appendChild(it);
+  parent.append(h, ul);
+}
 
 function buildTree() {
   const nav = $("#tree");
+  const openState = new Map($$("#tree details.grp").map((d) => [d.dataset.key, d.open]));
   nav.innerHTML = "";
+  // Csillagozottak előre (ha a kereső melletti csillag be van kapcsolva)
+  if (S.favFirst) {
+    const fm = DATA.monos.filter((m) => isFav(m.id)), fd = DIS_SORTED.filter((d) => isFav(d.id));
+    const fav = details("lvl1 fav", "Csillagozottak", `<span class="count">${fm.length + fd.length}</span>`, true, "fav");
+    if (fm.length) subList(fav, "Monoszacharidok", fm.map(monoItem));
+    if (fd.length) subList(fav, "Diszacharidok", fd.map(diItem));
+    if (!fm.length && !fd.length) {
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = "Még nincs csillagozott molekula. A nevek melletti csillaggal jelölheted meg őket.";
+      fav.appendChild(p);
+    }
+    nav.appendChild(fav);
+  }
   // Monoszacharidok: szénatomszám szerint növekvő sorrendben
-  const mono = details("lvl1", "Monoszacharidok", `<span class="count">${DATA.monos.length}</span>`, true);
+  const mono = details("lvl1", "Monoszacharidok", `<span class="count">${DATA.monos.length}</span>`, true, "mono");
   for (const n of [3, 4, 5, 6, 7]) {
     const list = DATA.monos.filter((m) => m.n === n);
     if (!list.length) continue;
-    const d2 = details("lvl2", `${CLS[n]} `, `<span class="cn">C${subNum(n)}</span>`, n === 6);
-    for (const s of SUBS) {
-      const ls = list.filter((m) => m.sub === s);
-      if (!ls.length) continue;
-      const h = document.createElement("div");
-      h.className = "subhead";
-      h.textContent = SUB[s];
-      const ul = document.createElement("ul");
-      ul.className = "items";
-      for (const m of ls) ul.appendChild(itemButton(m.id, m.name, m.alt || m.formula, !m.alt, `${m.name} ${m.alt} ${m.id}`));
-      d2.append(h, ul);
+    const d2 = details("lvl2", `${CLS[n]} `, `<span class="cn">C${subNum(n)}</span>`, n === 6, `mono-${n}`);
+    for (const sb of SUBS) {
+      const ls = list.filter((m) => m.sub === sb);
+      if (ls.length) subList(d2, SUB[sb], ls.map(monoItem));
     }
     mono.appendChild(d2);
   }
   nav.appendChild(mono);
-
-  // Diszacharidok: az 1. egység szerint, egyezés esetén a 2. szerint
-  const pos = (d) => +((d.link.match(/[→↔](\d)/) || [0, 9])[1]);
-  const dis = [...DATA.dis].sort((a, b) =>
-    MONO_IDX.get(a.A) - MONO_IDX.get(b.A) || MONO_IDX.get(a.B) - MONO_IDX.get(b.B) ||
-    pos(a) - pos(b) || a.link.localeCompare(b.link));
-  const top = details("lvl1", "Diszacharidok", `<span class="count">${dis.length}</span>`, true);
-  let curCls = null, curPair = null, d2 = null, ul = null;
-  for (const d of dis) {
+  const top = details("lvl1", "Diszacharidok", `<span class="count">${DIS_SORTED.length}</span>`, true, "di");
+  let curCls = null, curPair = null, d2 = null, items = [];
+  const flush = () => { if (items.length) subList(d2, curPair, items); items = []; };
+  for (const d of DIS_SORTED) {
     const nA = MONO.get(d.A).n, nB = MONO.get(d.B).n;
     const cls = `${CLS1[nA]} + ${CLS1[nB]}`;
+    const pair = `${unitName(d.A)} + ${unitName(d.B)}`;
     if (cls !== curCls) {
+      flush();
       curCls = cls;
       curPair = null;
-      d2 = details("lvl2", cls, "", nA === 6 && nB === 6);
+      d2 = details("lvl2", cls, "", nA === 6 && nB === 6, `di-${cls}`);
       top.appendChild(d2);
     }
-    const pair = `${unitName(d.A)} + ${unitName(d.B)}`;
-    if (pair !== curPair) {
-      curPair = pair;
-      const h = document.createElement("div");
-      h.className = "subhead";
-      h.textContent = pair;
-      ul = document.createElement("ul");
-      ul.className = "items";
-      d2.append(h, ul);
-    }
-    ul.appendChild(itemButton(d.id, d.name, d.link, true, `${d.name} ${d.alt} ${d.id} ${pair}`));
+    if (pair !== curPair) { flush(); curPair = pair; }
+    items.push(diItem(d));
   }
+  flush();
   nav.appendChild(top);
   const empty = document.createElement("p");
   empty.className = "empty";
@@ -607,13 +642,23 @@ function buildTree() {
   empty.hidden = true;
   empty.textContent = "Nincs ilyen nevű molekula a listában.";
   nav.appendChild(empty);
+  for (const d of $$("#tree details.grp")) if (openState.has(d.dataset.key)) d.open = openState.get(d.dataset.key);
+  markCurrent();
+  filterTree($("#search").value);
+}
 
-  nav.addEventListener("click", (e) => {
-    const b = e.target.closest(".item");
-    if (!b) return;
-    select(b.dataset.id);
-    closeDrawers();
-  });
+function markCurrent() {
+  for (const b of $$(".item")) b.setAttribute("aria-current", String(!Q.on && !!st.rec && b.dataset.id === st.rec.id));
+}
+
+function toggleFav(id) {
+  const i = S.fav.indexOf(id);
+  if (i >= 0) S.fav.splice(i, 1);
+  else S.fav.push(id);
+  save();
+  if (S.favFirst) buildTree();
+  else $$(`.star[data-star="${id}"]`).forEach((b) => b.setAttribute("aria-pressed", String(isFav(id))));
+  renderQuiz();
 }
 
 function filterTree(q) {
@@ -631,7 +676,7 @@ function filterTree(q) {
   }
   for (const d of $$("details.grp")) {
     const vis = $$(".items", d).some((u) => !u.hidden);
-    d.hidden = !vis;
+    d.hidden = !vis && !(d.classList.contains("fav") && !nq);
     if (nq && vis) d.open = true;
   }
   $("#emptyMsg").hidden = any;
@@ -671,6 +716,7 @@ function syncControls() {
   $$("#segStyle button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === S.style)));
   $("#speed").value = String(S.speed);
   controls.autoRotate = !!S.autoRotate;
+  $("#favFirst").setAttribute("aria-pressed", String(!!S.favFirst));
   $("#holoOn").checked = !!S.holo;
   $("#holoQ").setAttribute("aria-pressed", String(!!S.holo));
   $("#holoOpacity").value = String(S.holoOpacity);
@@ -784,6 +830,29 @@ function bindControls() {
   $("#openRight").addEventListener("click", () => openDrawer("right"));
   $("#backdrop").addEventListener("click", closeDrawers);
   $("#search").addEventListener("input", (e) => filterTree(e.target.value));
+  $("#tree").addEventListener("click", (e) => {
+    const star = e.target.closest(".star");
+    if (star) { toggleFav(star.dataset.star); return; }
+    const b = e.target.closest(".item");
+    if (!b) return;
+    select(b.dataset.id);
+    closeDrawers();
+  });
+  $("#favFirst").addEventListener("click", () => {
+    S.favFirst = !S.favFirst;
+    save();
+    $("#favFirst").setAttribute("aria-pressed", String(S.favFirst));
+    buildTree();
+  });
+  $("#segMode").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (b) setMode(b.dataset.v);
+  });
+  $("#qOpts").addEventListener("click", (e) => {
+    const b = e.target.closest(".opt");
+    if (b && !b.disabled) quizAnswer(b.dataset.id);
+  });
+  $("#qNext").addEventListener("click", quizNew);
 }
 function openDrawer(side) {
   $(`#${side}`).classList.add("open");
@@ -807,21 +876,135 @@ function togglePlay() {
 }
 
 // ---- kiválasztás --------------------------------------------------------------
-function select(id) {
-  const rec = MONO.get(id) || DI.get(id);
+function load(id, opts = {}) {
+  const rec = recOf(id);
   if (!rec) return;
   st.rec = rec;
   st.di = DI.has(id);
   st.cfg = rec.cfg || "D";
-  st.vkey = rec.defv || null;
+  st.vkey = opts.vkey ?? rec.defv ?? null;
   st.tl = "closure";
   st.playing = false;
   const closable = st.di ? rec.reducing : rec.v.length > 0;
   if (st.di && !rec.reducing) st.tl = "cond";
   st.t = closable || st.di ? 1 : 0;
-  for (const b of $$(".item")) b.setAttribute("aria-current", String(b.dataset.id === id));
-  try { history.replaceState(null, "", `#${id}`); } catch { /* beágyazott nézet */ }
   rebuild(true);
+  markCurrent();
+}
+function select(id) {
+  if (Q.on) { quizAnswer(id); return; }
+  load(id);
+  try { history.replaceState(null, "", `#${id}`); } catch { /* beágyazott nézet */ }
+}
+
+// ---- tippelő (gyakorlás) ----------------------------------------------------------
+const Q = { on: false, id: null, opts: [], answered: false, picked: null, last: null };
+const quizHidden = () => Q.on && !Q.answered;
+const hideName = (s) => (quizHidden() ? "?" : s);
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+function quizPool() {
+  const favs = S.fav.filter((id) => recOf(id));
+  return favs.length >= 2 ? { ids: favs, starred: true } : { ids: ALL_IDS, starred: false };
+}
+function quizNew() {
+  const pool = quizPool();
+  let cand = pool.ids.filter((id) => id !== Q.last);
+  if (!cand.length) cand = pool.ids;
+  const id = cand[Math.floor(Math.random() * cand.length)];
+  const isDi = DI.has(id);
+  // válaszlehetőségek: a csillagozottakból, ha kevés, hasonló molekulákkal kiegészítve
+  let others = shuffle(pool.ids.filter((x) => x !== id && DI.has(x) === isDi));
+  if (others.length < 3) others = others.concat(shuffle(pool.ids.filter((x) => x !== id && DI.has(x) !== isDi)));
+  if (others.length < 3) {
+    const rank = (x) => (isDi ? 0 : Math.abs(MONO.get(x).n - MONO.get(id).n));
+    const extra = shuffle(ALL_IDS.filter((x) => x !== id && !others.includes(x) && DI.has(x) === isDi))
+      .sort((a, b) => rank(a) - rank(b));
+    others = others.concat(extra);
+  }
+  Q.id = id;
+  Q.last = id;
+  Q.opts = shuffle([id, ...others.slice(0, 3)]);
+  Q.answered = false;
+  Q.picked = null;
+  const rec = recOf(id);
+  const vkey = rec.v && rec.v.length ? rec.v[Math.floor(Math.random() * rec.v.length)].key : null;
+  load(id, { vkey });
+  renderQuiz();
+}
+function quizAnswer(id) {
+  if (!Q.on || Q.answered || !recOf(id)) return;
+  Q.answered = true;
+  Q.picked = id;
+  S.quiz.total++;
+  if (id === Q.id) S.quiz.ok++;
+  save();
+  closeDrawers();
+  renderQuiz();
+  updateStaticUI();
+  changed();
+}
+function renderQuiz() {
+  $("#quiz").hidden = !Q.on;
+  $(".title-block").hidden = Q.on;
+  $(".app").classList.toggle("quiz-mode", Q.on);
+  $$("#segMode button").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.v === "quiz") === Q.on)));
+  if (!Q.on) return;
+  const pool = quizPool();
+  $("#qScore").textContent = `Helyes: ${S.quiz.ok} / ${S.quiz.total}`;
+  $("#qPool").textContent = pool.starred
+    ? `A ${pool.ids.length} csillagozott molekulából kérdezek.`
+    : "Nincs legalább két csillagozott molekula, ezért az összesből kérdezek. A listában a csillaggal jelölheted ki, mit gyakorolj.";
+  $("#qOpts").innerHTML = "";
+  for (const id of Q.opts) {
+    const r = recOf(id);
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "opt";
+    b.dataset.id = id;
+    b.innerHTML = `<span></span><small></small>`;
+    b.querySelector("span").textContent = r.name;
+    b.querySelector("small").textContent = DI.has(id) ? "diszacharid" : "monoszacharid";
+    if (Q.answered) {
+      b.disabled = true;
+      if (id === Q.id) b.classList.add("ok");
+      else if (id === Q.picked) b.classList.add("bad");
+    }
+    $("#qOpts").appendChild(b);
+  }
+  const r = recOf(Q.id);
+  if (!Q.answered) {
+    $("#qMsg").textContent = "Forgasd, válts 2D-re, játszd le, aztán válassz! A listából is választhatsz.";
+    $("#qNext").textContent = "Másikat kérek";
+  } else {
+    const ok = Q.picked === Q.id;
+    const extra = st.di ? ` – ${bondInfo(r).long}` : "";
+    const picked = ok ? "" : ` (Te ezt választottad: ${recOf(Q.picked).name}.)`;
+    $("#qMsg").innerHTML = `<b>${ok ? "Helyes!" : "Nem talált."}</b> Ez ${ok ? "" : "volt "}a molekula: <b></b> · <span></span>${extra}${picked}`;
+    $("#qMsg").querySelector("b + b").textContent = r.name;
+    $("#qMsg").querySelector("span").textContent = stateName();
+    $("#qNext").textContent = "Következő molekula";
+  }
+}
+function setMode(mode) {
+  const on = mode === "quiz";
+  if (on === Q.on) return;
+  Q.on = on;
+  if (on) {
+    quizNew();
+    try { history.replaceState(null, "", "#tippelo"); } catch { /* beágyazott nézet */ }
+  } else {
+    try { history.replaceState(null, "", `#${st.rec.id}`); } catch { /* beágyazott nézet */ }
+    renderQuiz();
+    markCurrent();
+    updateStaticUI();
+    changed();
+  }
 }
 
 function pickModels() {
@@ -847,12 +1030,26 @@ function changed() { dirty = true; }
 
 function fmtMass(m) { return `${m.toFixed(2).replace(".", ",")} g/mol`; }
 
+/** A glikozidos kötés leírása: α/β és a kapcsolódó szénatomok. */
+function bondInfo(r) {
+  const m = /^([αβ])\((\d)([→↔])(\d)\)([αβ]?)$/.exec(r.link);
+  if (!m) return { short: r.link, long: r.link };
+  const word = { "α": "alfa", "β": "béta" };
+  const type = m[5] ? `${m[1]},${m[5]}` : m[1];
+  const short = `${type}-glikozidos kötés · C${m[2]} ${m[3]} C${m[4]}′`;
+  const long = `${r.link} glikozidos kötés: ${m[5] ? `${word[m[1]]}–${word[m[5]]}` : word[m[1]]} kötés az első egység ` +
+    `(${unitName(r.A)}) C${m[2]} és a második egység (${unitName(r.B)}) C${m[4]}′ szénatomja között, oxigénhídon át.` +
+    (m[5] ? " Mindkét glikozidos szénatom részt vesz benne." : "");
+  return { short, long };
+}
+
 function updateStaticUI() {
   const r = st.rec;
   $("#title").textContent = r.name;
   $("#alt").textContent = r.alt ? r.alt : "";
   $("#desc").textContent = r.desc;
-  document.title = `${r.name} – Szénhidrát 3D`;
+  document.title = Q.on ? "Tippelő – Szénhidrát 3D" : `${r.name} – Szénhidrát 3D`;
+  $("#formHint").hidden = quizHidden();
   if (!st.di) {
     $("#eyebrow").textContent = `Monoszacharid · ${CLS1[r.n]} · ${SUB1[r.sub]}`;
   } else {
@@ -952,7 +1149,7 @@ function caption() {
     if (t < TIMING.bond[0]) return `<span class="phase">1.</span><b>A szénlánc elfordul</b> a C–C kötések mentén, így az ${ok} oxigénje a ${a} karbonil-szénatom közelébe kerül.`;
     if (t < TIMING.hop[0]) return `<span class="phase">2.</span><b>Az ${ok} nemkötő elektronpárja megtámadja a ${a}-et:</b> új C–O kötés jön létre, a C=O kettős kötés felnyílik, a ${a} tetraéderessé válik.`;
     if (t < 0.999) return `<span class="phase">3.</span><b>A H átkerül az ${oa}-re:</b> kialakul a glikozidos OH-csoport.`;
-    const name = st.di ? v.common : v.name.replace("{cfg}", st.cfg);
+    const name = hideName(st.di ? v.common : v.name.replace("{cfg}", st.cfg));
     let ch = !st.di && v.chair && v.chair !== "env" && v.chair !== "other" ? v.chair : "";
     if (ch && st.cfg === "L") ch = ch === "4C1" ? "1C4" : "4C1"; // a tükörképben a szék is átfordul
     const chair = ch ? ` (${ch} szék)` : "";
@@ -964,15 +1161,15 @@ function caption() {
   if (t <= 0.001) return `<span class="phase">0.</span><b>Két különálló monoszacharid.</b> Az első egység glikozidos OH-ja (${cA}) és a második egység ${oB} hidroxilcsoportja reagál majd.`;
   if (t < 0.42) return `<span class="phase">1.</span><b>A két monoszacharid megközelíti egymást.</b>`;
   if (t < 0.7) return `<span class="phase">2.</span><b>Kondenzáció:</b> a ${cA} glikozidos OH-ja és az ${oB} hidrogénje vízként lép ki; az ${oB} kötést létesít a ${cA}-gyel.`;
-  if (t < 0.999) return `<span class="phase">3.</span><b>A vízmolekula eltávozik.</b> Kialakult a glikozidos kötés: ${r.link}.`;
+  if (t < 0.999) return `<span class="phase">3.</span><b>A vízmolekula eltávozik.</b> Kialakult a glikozidos kötés${quizHidden() ? "" : `: ${r.link}`}.`;
   void N;
-  return `<b>Diszacharid: ${v.common}.</b> Glikozidos kötés: ${r.link} (${cA}–O–${m.lab[v.cond.newBond[1]].replace(/^O/, "C")}). ${r.reducing ? "A második egység glikozidos OH-ja szabad, ezért redukáló." : "Nincs szabad glikozidos OH, ezért nem redukáló."}`;
+  return `<b>Diszacharid: ${hideName(v.common)}.</b> Glikozidos kötés: ${hideName(r.link)} (${cA}–O–${m.lab[v.cond.newBond[1]].replace(/^O/, "C")}). ${r.reducing ? "A második egység glikozidos OH-ja szabad, ezért redukáló." : "Nincs szabad glikozidos OH, ezért nem redukáló."}`;
 }
 
 function paperCaption() {
   const t = st.t, m = model, r = st.rec, v = m.v, L = m.lab, T = PAPER_T;
-  const a = L[v.aC], ok = L[v.rO], oa = L[v.aO], ck = L[v.tHo[1]], ck1 = L[v.tHo[2]];
-  const nm = st.di ? v.common : v.name.replace("{cfg}", st.cfg);
+  const a = L[v.aC], ok = L[v.rO], oa = L[v.aO], ck = L[v.tHo[1]];
+  const nm = hideName(st.di ? v.common : v.name.replace("{cfg}", st.cfg));
   if (t <= 0.001) {
     return st.di
       ? `<span class="phase">0.</span><b>Az első egység Haworth-képletben, a második (redukáló vég) Fischer-projekcióban.</b> A jobbra rajzolt csoportok a Haworth-képletben lefelé kerülnek.`
@@ -982,20 +1179,25 @@ function paperCaption() {
   if (t < T.bend[1]) return `<span class="phase">${st.di ? 1 : 2}.</span><b>A szénláncot gyűrűvé hajlítjuk;</b> a csoportok megtartják a fent/lent állásukat.`;
   if (t < T.twist[1]) {
     const n = st.di ? 2 : 3;
-    if (!m.twisted) return `<span class="phase">${n}.</span><b>Az ${ok} a gyűrű síkjába kerül.</b>`;
-    const fic = (v.g.ficak || []).length ? ", a ficak pedig kiáll a gyűrű síkjából" : "";
-    return `<span class="phase">${n}.</span><b>Elfordulás a ${ck1}–${ck} kötés körül:</b> az ${ok} a gyűrű síkjába kerül${fic}.`;
+    if (!m.twisted) return `<span class="phase">${n}.</span><b>Az ${ok} a gyűrűbe kerül.</b>`;
+    const fic = (v.g.ficak || []).length ? ", a ficak pedig kiáll a gyűrűből" : "";
+    return `<span class="phase">${n}.</span><b>Elfordulás a ${ck} körül:</b> az ${ok} a gyűrűbe kerül${fic}.`;
   }
   if (t < T.hop[0]) return `<span class="phase">${st.di ? 3 : 4}.</span><b>Az ${ok} és a ${a} között kötés alakul ki,</b> a C=O kettős kötés felnyílik.`;
   if (t < 0.999) return `<span class="phase">${st.di ? 4 : 5}.</span><b>A H átkerül az ${oa}-re:</b> kialakul a glikozidos OH-csoport.`;
-  return `<b>Haworth-képlet: ${nm}.</b> A gyűrű vízszintesen fekszik, a csoportok függőlegesen fel vagy le állnak. Forgasd meg, vagy kapcsold be a hologramot a valódi térbeli alakhoz!`;
+  return `<b>Haworth-képlet: ${nm}.</b> A gyűrű lapított sokszög a papír síkjában, a csoportok függőleges vonalakon fel vagy le állnak. Kapcsold be a hologramot a valódi térbeli alakhoz!`;
 }
 
 function updateDynamicUI() {
   $("#stateName").textContent = stateName();
   const r = st.rec;
   const chips = [`<span class="chip mono">${r.formula}</span>`, `<span class="chip">${fmtMass(r.mass)}</span>`];
-  if (st.di) chips.push(`<span class="chip mono">${r.link}</span>`);
+  if (st.di) {
+    const bi = bondInfo(r);
+    chips.push(`<span class="chip bond" title="${bi.long}"><i class="dot" style="background:${S.colors.bridge}"></i>${bi.short}</span>`);
+    $("#bondLine").textContent = bi.long;
+  }
+  $("#bondLine").hidden = !st.di;
   $("#chips").innerHTML = chips.join("");
   $("#caption").innerHTML = caption();
   $("#scrub").value = String(Math.round(st.t * 1000));
@@ -1109,9 +1311,12 @@ bindControls();
 syncControls();
 resize();
 const startId = decodeURIComponent((location.hash || "").slice(1));
-select(MONO.has(startId) || DI.has(startId) ? startId : "glukoz");
+load(recOf(startId) ? startId : "glukoz");
+renderQuiz();
+if (startId === "tippelo") setMode("quiz");
 window.addEventListener("hashchange", () => {
   const id = decodeURIComponent(location.hash.slice(1));
-  if ((MONO.has(id) || DI.has(id)) && id !== st.rec.id) select(id);
+  if (id === "tippelo") setMode("quiz");
+  else if (recOf(id) && (Q.on || id !== st.rec.id)) { setMode("view"); select(id); }
 });
 requestAnimationFrame(loop);
