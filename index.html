@@ -78,8 +78,10 @@ button { cursor: pointer; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 [hidden] { display: none !important; }
 
+body { display: flex; flex-direction: column; }
 .app {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 272px minmax(0, 1fr) 304px;
   gap: 12px;
@@ -251,7 +253,9 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 50%; }
 .eye[aria-pressed="false"] .off { display: block; }
 
 .toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
-.toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.toggle { position: relative; }
+/* a rejtett jelölőnégyzet a kapcsolón belül marad, így fókuszáláskor nem görgeti el az oldalt */
+.toggle input { position: absolute; left: 0; top: 0; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
 .toggle .sw {
   width: 32px; height: 18px; border-radius: 999px; background: var(--line); position: relative; flex: none; transition: background .15s;
 }
@@ -274,6 +278,72 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 50%; }
 .help { color: var(--faint); font-size: 11.5px; margin: 0; }
 
 .backdrop { display: none; }
+
+/* felső sáv */
+.topbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding-top: 8px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.topbar .ver { font-size: 12px; color: var(--muted); text-decoration: none; }
+.topbar .ver:hover { color: var(--accent); text-decoration: underline; }
+.topbar .sp { flex: 1; }
+.tbtn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--raised); font-size: 12.5px; font-weight: 500;
+  color: var(--ink); text-decoration: none; line-height: 1.3;
+}
+.tbtn:hover { border-color: var(--accent); }
+
+/* X-elés a tippelőben */
+.xbtn {
+  flex: none; width: 34px; height: 30px; border: 0; border-radius: 7px; background: transparent;
+  display: none; place-items: center; color: var(--line);
+}
+.xm { fill: none; stroke: currentColor; stroke-width: 3.2; stroke-linecap: round; }
+.xbtn:hover { color: var(--faint); }
+.xbtn[aria-pressed="true"] { color: var(--bad); }
+.app.quiz-mode .xbtn { display: grid; }
+.app.quiz-mode .items .star, .app.quiz-mode .item .meta { display: none; }
+.app.quiz-mode .item[aria-current="true"] { background: transparent; color: inherit; }
+.app:not(.quiz-mode) .quiz-only, .app.quiz-mode .view-only { display: none; }
+.app.quiz-mode .star-filter[aria-pressed="true"] { color: var(--bad); background: var(--bad-soft); }
+.small-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.small-btns .btn { padding: 5px 9px; font-size: 12px; }
+.select { border: 1px solid var(--line); background: var(--raised); border-radius: 8px; padding: 5px 8px; font-size: 12.5px; }
+.range-row { display: flex; align-items: center; gap: 10px; }
+.range-row .range { flex: 1; accent-color: var(--accent); }
+.range-row output { font: 500 13px var(--font-mono); color: var(--ink); min-width: 3ch; text-align: right; }
+
+/* felugró ablakok */
+.modal-bg {
+  position: fixed; inset: 0; z-index: 50; background: rgba(6, 10, 18, .46);
+  display: grid; place-items: center;
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px))
+    max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+}
+.modal {
+  width: min(540px, 100%); max-height: 100%; overflow: auto; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 20px 60px rgba(0, 0, 0, .3);
+  padding: 20px 22px; display: grid; gap: 12px;
+}
+.modal.small { width: min(400px, 100%); }
+.modal h2 { margin: 0; font: 600 20px/1.2 var(--font-display); }
+.modal p, .modal li { margin: 0; color: var(--muted); font-size: 13.5px; }
+.modal ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.modal li b { color: var(--ink); font-weight: 600; }
+.modal .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.modal .row .chk-line { margin-right: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink); cursor: pointer; }
+.modal .row .chk-line input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
+.modal a.btn { text-decoration: none; color: var(--ink); }
+.code-input {
+  width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--raised);
+  font: 600 18px var(--font-mono); letter-spacing: .12em; text-transform: uppercase;
+}
+.code-msg { min-height: 1.4em; font-size: 13px; }
+.code-msg.bad { color: var(--bad-ink); }
+.code-msg.ok { color: var(--good-ink); }
 
 /* csillagozás */
 .search input { padding-right: 40px; }
@@ -308,7 +378,17 @@ details.fav > summary { color: var(--star-ink); }
 .quiz-top { display: flex; align-items: center; gap: 10px; }
 .score { margin-left: auto; font: 500 12px var(--font-mono); color: var(--muted); }
 .quiz-pool { margin: 0; font-size: 12px; color: var(--muted); }
-.quiz-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.quiz-opts {
+  --per-row: 4; --rows: 1;
+  display: grid; gap: 8px; grid-template-columns: repeat(var(--per-row), minmax(0, 1fr));
+}
+/* háromnál több sor helyett: 3 sor, a többi jobbra görgethető */
+.quiz-opts.scrolling {
+  grid-template-columns: none; grid-auto-flow: column; grid-template-rows: repeat(var(--rows), auto);
+  grid-auto-columns: calc((100% - (var(--per-row) - 1) * 8px) / var(--per-row));
+  overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin;
+}
+.opt small { font-family: var(--font-mono); }
 .opt {
   border: 1px solid var(--line); background: var(--raised); border-radius: 10px; padding: 9px 12px;
   font-weight: 500; text-align: left; display: grid; gap: 1px;
@@ -369,10 +449,15 @@ details.fav > summary { color: var(--star-ink); }
   .seg.mode { order: 2; flex-basis: 100%; }
   .seg.mode button { flex: 1; }
   .quiz { order: 4; flex-basis: 100%; }
-  .quiz-opts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  /* keskeny kijelzőn a középső rész görgethető, a molekula legalább a képernyő felét kapja */
+  .stage { overflow-y: auto; }
+  .viewport { flex: 1 0 auto; min-height: max(280px, 50vh); }
+  .topbar .ver .long { display: none; }
+  .tbtn { padding: 4px 9px; font-size: 12px; }
+  .quiz-opts { gap: 6px; }
   .quiz { gap: 6px; }
   .quiz h1 { font-size: 17px; }
-  .quiz-pool, .opt small { display: none; }
+  .quiz-pool { display: none; }
   .opt { padding: 7px 10px; font-size: 13px; }
   .quiz-msg { font-size: 12px; min-width: 0; }
   .quiz-foot .btn { padding: 6px 10px; }
@@ -393,6 +478,18 @@ details.fav > summary { color: var(--star-ink); }
 </style>
 </head>
 <body>
+<header class="topbar">
+  <a class="ver" id="verLink" href="https://github.com/szekelygyorgygyuri-arch/Szenhidrat-n-zeget-bioszra/blob/main/CHANGELOG.md" target="_blank" rel="noopener">v1.4<span class="long"> · újdonságok</span></a>
+  <span class="sp"></span>
+  <button type="button" class="tbtn" id="btnRedeem">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12v8H4v-8M2 7h20v5H2zM12 20V7M12 7H8a2.5 2.5 0 1 1 0-5c3 0 4 5 4 5zM12 7h4a2.5 2.5 0 1 0 0-5c-3 0-4 5-4 5z"/></svg>
+    Redeem code
+  </button>
+  <a class="tbtn" id="btnBugs" href="https://github.com/szekelygyorgygyuri-arch/Szenhidrat-n-zeget-bioszra/issues" target="_blank" rel="noopener">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2l1.9 1.9M16 2l-1.9 1.9M9 7.1V6a3 3 0 0 1 6 0v1.1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6zM12 20v-9M6.5 9 3 7M6 13H2M6 17l-3 2M17.5 9 21 7M18 13h4M18 17l3 2"/></svg>
+    Report bugs
+  </a>
+</header>
 <div class="app">
   <aside class="panel side left" id="left" aria-label="Molekulák">
     <div class="brand">
@@ -496,7 +593,51 @@ details.fav > summary { color: var(--star-ink); }
 
   <aside class="panel side right settings" id="right" aria-label="Beállítások">
     <div class="scroll">
-      <section class="sec" aria-labelledby="h-view">
+      <section class="sec quiz-only" aria-labelledby="h-qs">
+        <h3 id="h-qs">Tippelő beállításai</h3>
+        <div class="field">
+          <span class="lab">Nézet a kérdéseknél</span>
+          <div class="seg" id="qsView" role="group" aria-label="Nézet a kérdéseknél">
+            <button type="button" data-v="3d">3D</button>
+            <button type="button" data-v="paper">2D (papír)</button>
+            <button type="button" data-v="mix">Vegyesen</button>
+          </div>
+          <span class="hint">A tippelőben a nézet nem váltható; a változás a következő molekulától érvényes.</span>
+        </div>
+        <div class="field">
+          <span class="lab">Miből kérdezzen</span>
+          <div class="seg" id="qsSource" role="group" aria-label="Miből kérdezzen">
+            <button type="button" data-v="x" id="qsSourceX">Kijelöltek</button>
+            <button type="button" data-v="all" id="qsSourceAll">Összes</button>
+          </div>
+          <span class="hint">A bal oldali listában X-szel jelölöd ki a molekulákat. Elsőre a csillagozottak vannak kijelölve.</span>
+          <div class="small-btns">
+            <button type="button" class="btn" id="qsFromFav">Csillagozottak X-elése</button>
+            <button type="button" class="btn" id="qsClearX">X-ek törlése</button>
+          </div>
+        </div>
+        <div class="field">
+          <label class="lab" for="qsCount">Válaszlehetőségek száma</label>
+          <div class="range-row"><input class="range" type="range" id="qsCount" min="2" max="4" step="1"><output id="qsCountVal"></output></div>
+          <span class="hint" id="qsCountHint"></span>
+        </div>
+        <div class="field">
+          <label class="lab" for="qsPerRow">Egy sorban</label>
+          <select class="select" id="qsPerRow">
+            <option value="0">Automatikus (az ablak szélessége szerint)</option>
+            <option value="2">2</option><option value="3">3</option><option value="4">4</option>
+            <option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option>
+          </select>
+          <span class="hint">Ha háromnál több sor kellene, a lehetőségek jobbra görgethetők.</span>
+        </div>
+        <div class="field">
+          <span class="lab">Megjelenítés</span>
+          <span class="hint">A tippelő saját megjelenítési beállításokkal dolgozik (lent), ezek nem változtatják a nézegetőét.</span>
+          <div class="small-btns"><button type="button" class="btn" id="qsCopyView">Nézegető beállításainak átvétele</button></div>
+        </div>
+      </section>
+
+      <section class="sec view-only" aria-labelledby="h-view">
         <h3 id="h-view">Nézet</h3>
         <div class="seg" id="segView" role="group" aria-label="Nézet">
           <button type="button" data-v="3d">3D modell</button>
@@ -589,6 +730,38 @@ details.fav > summary { color: var(--star-ink); }
   </aside>
 </div>
 <div class="backdrop" id="backdrop"></div>
+
+<div class="modal-bg" id="introBg" hidden>
+  <section class="modal" role="dialog" aria-modal="true" aria-labelledby="introTitle">
+    <h2 id="introTitle">Szénhidrát 3D</h2>
+    <p>Mono-, di- és poliszacharidok térbeli modelljei – biológia- és kémiaórához.</p>
+    <ul>
+      <li><b>Bal oldalt</b> választhatsz a 33 mono-, 24 di- és 27 poliszacharid közül; a csillaggal megjelölheted a kedvenceidet.</li>
+      <li><b>Középen</b> forgathatod a modellt. Lent lejátszhatod a gyűrűzáródást, a glikozidos kötés kialakulását vagy a lánc felépülését.</li>
+      <li><b>Jobb oldalt</b> színezheted a glikozidos OH-t, a gyűrű-O-t, a ficakot és a kamuficakot, és ki-be kapcsolhatod a H-atomokat és az OH-csoportokat.</li>
+      <li>A <b>2D (papír)</b> nézet a tankönyvi Fischer- és Haworth-képletet mutatja; a <b>hologram</b> rávetíti a másik nézetet.</li>
+      <li>Fent a <b>Tippelőben</b> gyakorolhatsz: a kijelölt molekulák közül kérdez.</li>
+    </ul>
+    <div class="row">
+      <label class="chk-line"><input type="checkbox" id="introHide"> Ne jelenjen meg többet ezen az eszközön</label>
+      <a class="btn" href="https://github.com/szekelygyorgygyuri-arch/Szenhidrat-n-zeget-bioszra" target="_blank" rel="noopener">Teljes leírás és changelog</a>
+      <button type="button" class="btn primary" id="introClose">Kezdés</button>
+    </div>
+  </section>
+</div>
+
+<div class="modal-bg" id="codeBg" hidden>
+  <form class="modal small" role="dialog" aria-modal="true" aria-labelledby="codeTitle" id="codeForm">
+    <h2 id="codeTitle">Redeem code</h2>
+    <p>Írd be a kódot. A kód csak az angol ábécé nagybetűiből (A–Z) állhat.</p>
+    <input class="code-input" id="codeInput" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="32" aria-label="Kód" placeholder="KOD">
+    <p class="code-msg" id="codeMsg" aria-live="polite"></p>
+    <div class="row">
+      <button type="button" class="btn" id="codeCancel">Mégse</button>
+      <button type="submit" class="btn primary">Beváltás</button>
+    </div>
+  </form>
+</div>
 
 <script src="data.js"></script>
 <script type="importmap">

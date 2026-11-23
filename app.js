@@ -57,15 +57,23 @@ const RADII = {
 // ---------------------------------------------------------------------------
 //  Beállítások (böngészőben megjegyezve)
 // ---------------------------------------------------------------------------
-const STORE = "szenhidrat3d.v1";
+// Beállítások: a nézegető (SV) és a tippelő (SQ) megjelenítési beállításai
+// külön élnek; a tippelő az elején a nézegetőéit veszi át. A közös adatok
+// (csillagok, X-ek, pontszám, tippelő-beállítások) az SH-ban vannak.
+const STORE = "szenhidrat3d.v2";
 const DEFAULTS = {
   colors: Object.fromEntries(GROUPS.map((g) => [g.key, g.color])),
   hl: Object.fromEntries(GROUPS.map((g) => [g.key, true])),
   vis: Object.fromEntries(GROUPS.map((g) => [g.key, true])),
   showH: true, showOH: true, labels: true, ringFill: false, hlOpen: true,
   style: "bs", el: { ...EL_DEFAULT }, autoRotate: false, speed: 1,
-  view: "3d", holo: false, holoOpacity: 32, fav: [], favFirst: false, quiz: { ok: 0, total: 0 },
+  view: "3d", holo: false, holoOpacity: 32,
   holoParts: { C: true, OH: true, H: true, ficak: true, kamu: true },
+};
+const SH_DEFAULTS = {
+  fav: [], favFirst: false, xset: null, xFirst: false, score: { ok: 0, total: 0 },
+  introHidden: false, codes: [],
+  quiz: { view: "3d", source: "x", count: 4, perRow: 0 },
 };
 const HOLO_PARTS = [
   { key: "C", name: "C-váz" },
@@ -74,23 +82,45 @@ const HOLO_PARTS = [
   { key: "ficak", name: "Ficak" },
   { key: "kamu", name: "Kamuficak" },
 ];
-const S = (() => {
-  const base = JSON.parse(JSON.stringify(DEFAULTS));
+const clone = (o) => JSON.parse(JSON.stringify(o));
+function mergeInto(base, raw) {
+  if (!raw || typeof raw !== "object") return base;
+  for (const k of Object.keys(base)) {
+    if (!(k in raw)) continue;
+    if (base[k] && typeof base[k] === "object" && !Array.isArray(base[k])) Object.assign(base[k], raw[k]);
+    else base[k] = raw[k];
+  }
+  return base;
+}
+const { SV, SQ0, SH } = (() => {
+  const SV = clone(DEFAULTS), SH = clone(SH_DEFAULTS);
+  let SQ0 = null;
   try {
     const raw = JSON.parse(localStorage.getItem(STORE) || "null");
-    if (raw && typeof raw === "object") {
-      for (const k of Object.keys(base)) {
-        if (!(k in raw)) continue;
-        if (base[k] && typeof base[k] === "object") Object.assign(base[k], raw[k]);
-        else base[k] = raw[k];
+    if (raw) {
+      mergeInto(SV, raw.v);
+      mergeInto(SH, raw.sh);
+      if (raw.q) SQ0 = mergeInto(clone(DEFAULTS), raw.q);
+    } else {
+      // korábbi változat beállításainak átvétele
+      const old = JSON.parse(localStorage.getItem("szenhidrat3d.v1") || "null");
+      if (old) {
+        mergeInto(SV, old);
+        if (Array.isArray(old.fav)) SH.fav = old.fav;
+        SH.favFirst = !!old.favFirst;
+        if (old.quiz && typeof old.quiz.ok === "number") SH.score = old.quiz;
       }
     }
   } catch { /* nincs tárolás */ }
-  return base;
+  return { SV, SQ0, SH };
 })();
+let SQ = SQ0; // a tippelő megjelenítési beállításai (az első belépéskor jön létre)
+let S = SV; // az éppen érvényes megjelenítési beállítások
 const TOGGLES = ["showH", "showOH", "labels", "ringFill", "hlOpen", "autoRotate"];
 const TOGGLE_ID = { labels: "showLabels" };
-const save = () => { try { localStorage.setItem(STORE, JSON.stringify(S)); } catch { /* nincs tárolás */ } };
+const save = () => {
+  try { localStorage.setItem(STORE, JSON.stringify({ v: SV, q: SQ, sh: SH })); } catch { /* nincs tárolás */ }
+};
 
 // ---------------------------------------------------------------------------
 //  Állapot
@@ -573,7 +603,9 @@ new ResizeObserver(resize).observe(viewport);
 const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
 const STAR_SVG = `<svg class="st" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.6 5.5 6 .8-4.4 4.1 1.1 5.9L12 16.6l-5.3 2.9 1.1-5.9L3.4 9.5l6-.8z"/></svg>`;
-const isFav = (id) => S.fav.includes(id);
+const X_SVG = `<svg class="xm" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5 19 19M19 5 5 19"/></svg>`;
+const isFav = (id) => SH.fav.includes(id);
+const isX = (id) => (SH.xset || []).includes(id);
 const ALL_IDS = [...DATA.monos.map((m) => m.id), ...DATA.dis.map((d) => d.id), ...POLYS.map((p) => p.id)];
 const recOf = (id) => MONO.get(id) || DI.get(id) || POLY.get(id);
 const kindOf = (id) => (MONO.has(id) ? "mono" : DI.has(id) ? "di" : "poly");
@@ -601,7 +633,16 @@ function itemButton(id, name, meta, metaMono, search) {
   s.setAttribute("aria-label", `${name} csillagozása`);
   s.title = "Csillagozás";
   s.innerHTML = STAR_SVG;
-  li.append(b, s);
+  // a tippelőben a csillag helyett X-szel jelöljük ki, miből kérdezzen
+  const x = document.createElement("button");
+  x.type = "button";
+  x.className = "xbtn";
+  x.dataset.x = id;
+  x.setAttribute("aria-pressed", String(isX(id)));
+  x.setAttribute("aria-label", `${name} kijelölése a tippelőhöz`);
+  x.title = "Kijelölés a tippelőhöz";
+  x.innerHTML = X_SVG;
+  li.append(b, s, x);
   return li;
 }
 const monoItem = (m) => itemButton(m.id, m.name, m.alt || m.formula, !m.alt, `${m.name} ${m.alt} ${m.id}`);
@@ -631,18 +672,22 @@ function buildTree() {
   const nav = $("#tree");
   const openState = new Map($$("#tree details.grp").map((d) => [d.dataset.key, d.open]));
   nav.innerHTML = "";
-  // Csillagozottak előre (ha a kereső melletti csillag be van kapcsolva)
-  if (S.favFirst) {
-    const fm = DATA.monos.filter((m) => isFav(m.id)), fd = DIS_SORTED.filter((d) => isFav(d.id));
-    const fp = POLYS.filter((p) => isFav(p.id));
-    const fav = details("lvl1 fav", "Csillagozottak", `<span class="count">${fm.length + fd.length + fp.length}</span>`, true, "fav");
+  // Csillagozottak (a tippelőben: X-eltek) előre, ha a kereső melletti gomb be van kapcsolva
+  const marked = Q.on ? isX : isFav;
+  if (Q.on ? SH.xFirst : SH.favFirst) {
+    const fm = DATA.monos.filter((m) => marked(m.id)), fd = DIS_SORTED.filter((d) => marked(d.id));
+    const fp = POLYS.filter((p) => marked(p.id));
+    const fav = details("lvl1 fav", Q.on ? "Kijelöltek (X)" : "Csillagozottak",
+      `<span class="count">${fm.length + fd.length + fp.length}</span>`, true, Q.on ? "xfav" : "fav");
     if (fm.length) subList(fav, "Monoszacharidok", fm.map(monoItem));
     if (fd.length) subList(fav, "Diszacharidok", fd.map(diItem));
     if (fp.length) subList(fav, "Poliszacharidok", fp.map(polyItem));
     if (!fm.length && !fd.length && !fp.length) {
       const p = document.createElement("p");
       p.className = "empty";
-      p.textContent = "Még nincs csillagozott molekula. A nevek melletti csillaggal jelölheted meg őket.";
+      p.textContent = Q.on
+        ? "Még nincs kijelölt molekula. A nevek melletti X-szel jelölheted ki, miből kérdezzen."
+        : "Még nincs csillagozott molekula. A nevek melletti csillaggal jelölheted meg őket.";
       fav.appendChild(p);
     }
     nav.appendChild(fav);
@@ -703,12 +748,31 @@ function markCurrent() {
 }
 
 function toggleFav(id) {
-  const i = S.fav.indexOf(id);
-  if (i >= 0) S.fav.splice(i, 1);
-  else S.fav.push(id);
+  const i = SH.fav.indexOf(id);
+  if (i >= 0) SH.fav.splice(i, 1);
+  else SH.fav.push(id);
   save();
-  if (S.favFirst) buildTree();
+  if (SH.favFirst) buildTree();
   else $$(`.star[data-star="${id}"]`).forEach((b) => b.setAttribute("aria-pressed", String(isFav(id))));
+  renderQuiz();
+}
+
+function toggleX(id) {
+  if (!SH.xset) SH.xset = [];
+  const i = SH.xset.indexOf(id);
+  if (i >= 0) SH.xset.splice(i, 1);
+  else SH.xset.push(id);
+  save();
+  if (SH.xFirst) buildTree();
+  else $$(`.xbtn[data-x="${id}"]`).forEach((b) => b.setAttribute("aria-pressed", String(isX(id))));
+  syncQuizSettings();
+  renderQuiz();
+}
+function setXset(ids) {
+  SH.xset = [...ids];
+  save();
+  buildTree();
+  syncQuizSettings();
   renderQuiz();
 }
 
@@ -767,7 +831,8 @@ function syncControls() {
   $$("#segStyle button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === S.style)));
   $("#speed").value = String(S.speed);
   controls.autoRotate = !!S.autoRotate;
-  $("#favFirst").setAttribute("aria-pressed", String(!!S.favFirst));
+  $("#favFirst").setAttribute("aria-pressed", String(!!(Q.on ? SH.xFirst : SH.favFirst)));
+  $("#favFirst").title = Q.on ? "Kijelöltek (X) előre" : "Csillagozottak előre";
   $("#holoOn").checked = !!S.holo;
   $("#holoQ").setAttribute("aria-pressed", String(!!S.holo));
   $("#holoOpacity").value = String(S.holoOpacity);
@@ -790,6 +855,7 @@ function buildHoloParts() {
   }
 }
 function setView(v) {
+  if (Q.on) return; // a tippelőben a nézetet a tippelő beállításai rögzítik
   if (v === "paper" && !models.mP) return;
   if (S.view === v) return;
   S.view = v;
@@ -871,7 +937,7 @@ function bindControls() {
   $("#btnEnd").addEventListener("click", () => { st.playing = false; st.t = 1; changed(); });
   $("#scrub").addEventListener("input", (e) => { st.playing = false; st.t = +e.target.value / 1000; changed(); });
   document.addEventListener("keydown", (e) => {
-    if (e.code !== "Space" || e.target.closest("input, select, textarea, button")) return;
+    if (e.code !== "Space" || e.target.closest("input, select, textarea, button, a, .modal")) return;
     e.preventDefault();
     togglePlay();
   });
@@ -884,15 +950,19 @@ function bindControls() {
   $("#tree").addEventListener("click", (e) => {
     const star = e.target.closest(".star");
     if (star) { toggleFav(star.dataset.star); return; }
+    const xb = e.target.closest(".xbtn");
+    if (xb) { toggleX(xb.dataset.x); return; }
     const b = e.target.closest(".item");
     if (!b) return;
+    if (Q.on) { toggleX(b.dataset.id); return; } // a tippelőben a lista a kérdések körét állítja
     select(b.dataset.id);
     closeDrawers();
   });
   $("#favFirst").addEventListener("click", () => {
-    S.favFirst = !S.favFirst;
+    if (Q.on) SH.xFirst = !SH.xFirst;
+    else SH.favFirst = !SH.favFirst;
     save();
-    $("#favFirst").setAttribute("aria-pressed", String(S.favFirst));
+    syncControls();
     buildTree();
   });
   $("#segMode").addEventListener("click", (e) => {
@@ -956,7 +1026,7 @@ function select(id) {
 }
 
 // ---- tippelő (gyakorlás) ----------------------------------------------------------
-const Q = { on: false, id: null, opts: [], answered: false, picked: null, last: null };
+const Q = { on: false, id: null, opts: [], answered: false, picked: null, last: null, view: "3d", empty: false };
 const quizHidden = () => Q.on && !Q.answered;
 const hideName = (s) => (quizHidden() ? "?" : s);
 function shuffle(a) {
@@ -966,30 +1036,29 @@ function shuffle(a) {
   }
   return a;
 }
+/** A kérdések köre: az X-elt molekulák, vagy (ha úgy állítod) az összes. */
 function quizPool() {
-  const favs = S.fav.filter((id) => recOf(id));
-  return favs.length >= 2 ? { ids: favs, starred: true } : { ids: ALL_IDS, starred: false };
+  if (SH.quiz.source === "all") return { ids: ALL_IDS, all: true };
+  return { ids: (SH.xset || []).filter((id) => recOf(id)), all: false };
 }
+const optionCount = (pool) => Math.max(2, Math.min(SH.quiz.count || 4, pool.ids.length));
 function quizNew() {
   const pool = quizPool();
+  Q.empty = pool.ids.length < 2;
+  if (Q.empty) { Q.opts = []; renderQuiz(); return; }
   let cand = pool.ids.filter((id) => id !== Q.last);
   if (!cand.length) cand = pool.ids;
   const id = cand[Math.floor(Math.random() * cand.length)];
   const kind = kindOf(id);
-  // válaszlehetőségek: a csillagozottakból, ha kevés, hasonló molekulákkal kiegészítve
-  let others = shuffle(pool.ids.filter((x) => x !== id && kindOf(x) === kind));
-  if (others.length < 3) others = others.concat(shuffle(pool.ids.filter((x) => x !== id && kindOf(x) !== kind)));
-  if (others.length < 3) {
-    const rank = (x) => (kind !== "mono" ? 0 : Math.abs(MONO.get(x).n - MONO.get(id).n));
-    const extra = shuffle(ALL_IDS.filter((x) => x !== id && !others.includes(x) && kindOf(x) === kind))
-      .sort((a, b) => rank(a) - rank(b));
-    others = others.concat(extra);
-  }
+  // válaszlehetőségek a kérdések köréből; elsőként azonos fajtájúak (mono/di/poli)
+  const others = shuffle(pool.ids.filter((x) => x !== id && kindOf(x) === kind))
+    .concat(shuffle(pool.ids.filter((x) => x !== id && kindOf(x) !== kind)));
   Q.id = id;
   Q.last = id;
-  Q.opts = shuffle([id, ...others.slice(0, 3)]);
+  Q.opts = shuffle([id, ...others.slice(0, optionCount(pool) - 1)]);
   Q.answered = false;
   Q.picked = null;
+  Q.view = SH.quiz.view === "mix" ? (Math.random() < 0.5 ? "3d" : "paper") : SH.quiz.view;
   const rec = recOf(id);
   const vkey = rec.v && rec.v.length ? rec.v[Math.floor(Math.random() * rec.v.length)].key : null;
   load(id, { vkey });
@@ -999,13 +1068,32 @@ function quizAnswer(id) {
   if (!Q.on || Q.answered || !recOf(id)) return;
   Q.answered = true;
   Q.picked = id;
-  S.quiz.total++;
-  if (id === Q.id) S.quiz.ok++;
+  SH.score.total++;
+  if (id === Q.id) SH.score.ok++;
   save();
   closeDrawers();
   renderQuiz();
   updateStaticUI();
   changed();
+}
+/** Hány válasz férjen egy sorba: beállítható, vagy a hely alapján automatikus. */
+function perRow() {
+  if (SH.quiz.perRow > 0) return SH.quiz.perRow;
+  const n = Q.opts.length;
+  const w = $("#qOpts").clientWidth || $("#quiz").clientWidth || 600;
+  const fit = Math.max(2, Math.min(8, Math.floor((w + 8) / (window.innerWidth < 600 ? 122 : 142))));
+  if (n <= fit) return Math.max(2, n);
+  const rows = Math.ceil(n / fit);
+  return rows > 3 ? fit : Math.ceil(n / rows); // kiegyensúlyozott sorok
+}
+function layoutOptions() {
+  const box = $("#qOpts");
+  const n = Q.opts.length, k = perRow();
+  const rows = Math.ceil(n / k);
+  box.classList.toggle("scrolling", rows > 3);
+  box.style.setProperty("--per-row", k);
+  // legfeljebb 3 sor; ha több kellene, a lehetőségek jobbra görgethetők
+  box.style.setProperty("--rows", Math.min(3, rows));
 }
 function renderQuiz() {
   $("#quiz").hidden = !Q.on;
@@ -1014,11 +1102,18 @@ function renderQuiz() {
   $$("#segMode button").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.v === "quiz") === Q.on)));
   if (!Q.on) return;
   const pool = quizPool();
-  $("#qScore").textContent = `Helyes: ${S.quiz.ok} / ${S.quiz.total}`;
-  $("#qPool").textContent = pool.starred
-    ? `A ${pool.ids.length} csillagozott molekulából kérdezek.`
-    : "Nincs legalább két csillagozott molekula, ezért az összesből kérdezek. A listában a csillaggal jelölheted ki, mit gyakorolj.";
+  $("#qScore").textContent = `Helyes: ${SH.score.ok} / ${SH.score.total}`;
+  $("#qPool").textContent = pool.all
+    ? `Az összes (${pool.ids.length}) molekulából kérdezek, ${optionCount(pool)} lehetőséggel.`
+    : pool.ids.length >= 2
+      ? `A ${pool.ids.length} kijelölt (X) molekulából kérdezek, ${optionCount(pool)} lehetőséggel.`
+      : "";
   $("#qOpts").innerHTML = "";
+  if (Q.empty || pool.ids.length < 2) {
+    $("#qMsg").textContent = "Jelölj ki X-szel legalább két molekulát a bal oldali listában, vagy a beállításoknál válaszd, hogy az összesből kérdezzen.";
+    $("#qNext").textContent = "Kezdés";
+    return;
+  }
   for (const id of Q.opts) {
     const r = recOf(id);
     const b = document.createElement("button");
@@ -1027,7 +1122,7 @@ function renderQuiz() {
     b.dataset.id = id;
     b.innerHTML = `<span></span><small></small>`;
     b.querySelector("span").textContent = r.name;
-    b.querySelector("small").textContent = { mono: "monoszacharid", di: "diszacharid", poly: "poliszacharid" }[kindOf(id)];
+    b.querySelector("small").textContent = r.formula; // összegképlet a név alatt
     if (Q.answered) {
       b.disabled = true;
       if (id === Q.id) b.classList.add("ok");
@@ -1035,9 +1130,10 @@ function renderQuiz() {
     }
     $("#qOpts").appendChild(b);
   }
+  layoutOptions();
   const r = recOf(Q.id);
   if (!Q.answered) {
-    $("#qMsg").textContent = "Forgasd, válts 2D-re, játszd le, aztán válassz! A listából is választhatsz.";
+    $("#qMsg").textContent = `Forgasd, játszd le az animációt, aztán válassz! A nézet: ${Q.view === "paper" ? "2D (papír)" : "3D"}.`;
     $("#qNext").textContent = "Másikat kérek";
   } else {
     const ok = Q.picked === Q.id;
@@ -1054,19 +1150,88 @@ function setMode(mode) {
   if (on === Q.on) return;
   Q.on = on;
   if (on) {
+    // a tippelő először a nézegető beállításait és csillagait veszi át
+    if (!SQ) SQ = clone(SV);
+    if (!SH.xset) SH.xset = [...SH.fav];
+    S = SQ;
+  } else {
+    S = SV;
+  }
+  save();
+  refreshHl();
+  refreshElColors();
+  syncControls();
+  syncQuizSettings();
+  buildTree();
+  if (on) {
     quizNew();
     try { history.replaceState(null, "", "#tippelo"); } catch { /* beágyazott nézet */ }
   } else {
     try { history.replaceState(null, "", `#${st.rec.id}`); } catch { /* beágyazott nézet */ }
     renderQuiz();
+    pickModels();
+    fitCamera();
     markCurrent();
     updateStaticUI();
     changed();
   }
 }
 
+// ---- tippelő beállításai -------------------------------------------------------------
+function syncQuizSettings() {
+  const c = SH.quiz, pool = quizPool();
+  $$("#qsView button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === c.view)));
+  $$("#qsSource button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === c.source)));
+  const nx = (SH.xset || []).filter((id) => recOf(id)).length;
+  $("#qsSourceX").textContent = `Kijelöltek (${nx})`;
+  $("#qsSourceAll").textContent = `Összes (${ALL_IDS.length})`;
+  const max = Math.max(2, pool.ids.length);
+  const cnt = $("#qsCount");
+  cnt.max = String(max);
+  cnt.value = String(Math.min(c.count, max));
+  $("#qsCountVal").textContent = pool.ids.length >= 2 ? String(Math.min(c.count, max)) : "–";
+  $("#qsCountHint").textContent = pool.ids.length >= 2
+    ? `Legfeljebb ${max}: ennyi molekula van a kérdések körében.`
+    : "Előbb jelölj ki legalább két molekulát.";
+  cnt.disabled = pool.ids.length < 3;
+  $("#qsPerRow").value = String(c.perRow || 0);
+}
+function bindQuizSettings() {
+  $("#qsView").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    SH.quiz.view = b.dataset.v;
+    save(); syncQuizSettings();
+  });
+  $("#qsSource").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    SH.quiz.source = b.dataset.v;
+    save(); syncQuizSettings();
+    if (Q.on && (Q.empty || !quizPool().ids.includes(Q.id))) quizNew();
+    else renderQuiz();
+  });
+  $("#qsCount").addEventListener("input", (e) => {
+    SH.quiz.count = +e.target.value;
+    save(); syncQuizSettings();
+  });
+  $("#qsCount").addEventListener("change", () => { if (Q.on && !Q.answered) quizNew(); });
+  $("#qsPerRow").addEventListener("change", (e) => {
+    SH.quiz.perRow = +e.target.value;
+    save(); layoutOptions();
+  });
+  $("#qsFromFav").addEventListener("click", () => setXset(SH.fav.filter((id) => recOf(id))));
+  $("#qsClearX").addEventListener("click", () => setXset([]));
+  $("#qsCopyView").addEventListener("click", () => {
+    SQ = clone(SV);
+    S = Q.on ? SQ : SV;
+    save(); refreshHl(); refreshElColors(); syncControls(); changed();
+  });
+  new ResizeObserver(() => { if (Q.on && SH.quiz.perRow === 0) layoutOptions(); }).observe($("#quiz"));
+}
+
 function pickModels() {
-  const paper = S.view === "paper" && models.mP;
+  const paper = (Q.on ? Q.view : S.view) === "paper" && models.mP;
   model = paper ? models.mP : models.m3;
   holoModel = paper ? models.m3 : models.mP;
   P = null;
@@ -1168,7 +1333,7 @@ function updateStaticUI() {
   // nézet és hologram
   const hasPaper = !!models.mP;
   $$("#segView button, #segViewQ button").forEach((b) => {
-    b.disabled = b.dataset.v === "paper" && !hasPaper;
+    b.disabled = Q.on || (b.dataset.v === "paper" && !hasPaper);
     b.setAttribute("aria-pressed", String(b.dataset.v === (model.paper ? "paper" : "3d")));
   });
   $("#holoHint").textContent = model.paper
@@ -1391,11 +1556,92 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
+// ---- görgetésvédelem ---------------------------------------------------------------
+// Az oldal egyetlen képernyőt kitöltő alkalmazás: maga a dokumentum sosem görgethető.
+// (Korábban egy kapcsoló fókusza elgörgette, és a böngésző újratöltéskor ezt visszaállította.)
+try { history.scrollRestoration = "manual"; } catch { /* régi böngésző */ }
+function resetScroll() {
+  if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
+  const se = document.scrollingElement;
+  if (se && (se.scrollTop || se.scrollLeft)) { se.scrollTop = 0; se.scrollLeft = 0; }
+}
+window.addEventListener("scroll", resetScroll, { passive: true });
+
+// ---- felugró ablakok ---------------------------------------------------------------
+let lastFocus = null;
+function showModal(id, focusEl) {
+  lastFocus = document.activeElement;
+  $(id).hidden = false;
+  (focusEl || $(id).querySelector("input, button, a"))?.focus({ preventScroll: true });
+}
+function hideModal(id) {
+  $(id).hidden = true;
+  if (lastFocus && lastFocus.focus) lastFocus.focus({ preventScroll: true });
+}
+function closeIntro() {
+  SH.introHidden = $("#introHide").checked;
+  save();
+  hideModal("#introBg");
+}
+// Beváltható kódok: "KOD": { msg: "üzenet", apply() { … } } – ide lehet felvenni őket.
+const CODES = {};
+function setCodeMsg(text, kind = "") {
+  const el = $("#codeMsg");
+  el.textContent = text;
+  el.className = `code-msg ${kind}`;
+}
+function bindModals() {
+  $("#introHide").checked = !!SH.introHidden;
+  $("#introHide").addEventListener("change", (e) => { SH.introHidden = e.target.checked; save(); });
+  $("#introClose").addEventListener("click", closeIntro);
+  $("#introBg").addEventListener("click", (e) => { if (e.target === e.currentTarget) closeIntro(); });
+  $("#btnRedeem").addEventListener("click", () => {
+    $("#codeInput").value = "";
+    setCodeMsg("");
+    showModal("#codeBg", $("#codeInput"));
+  });
+  $("#codeCancel").addEventListener("click", () => hideModal("#codeBg"));
+  $("#codeBg").addEventListener("click", (e) => { if (e.target === e.currentTarget) hideModal("#codeBg"); });
+  // csak az angol ábécé nagybetűi: a kisbetűket nagyra váltjuk, minden mást elhagyunk
+  $("#codeInput").addEventListener("input", (e) => {
+    const el = e.target, pos = el.selectionStart ?? el.value.length;
+    const before = el.value.slice(0, pos).toUpperCase().replace(/[^A-Z]/g, "");
+    const v = el.value.toUpperCase().replace(/[^A-Z]/g, "");
+    if (v !== el.value) {
+      el.value = v;
+      el.setSelectionRange(before.length, before.length);
+    }
+    setCodeMsg("");
+  });
+  $("#codeForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const code = $("#codeInput").value.toUpperCase().replace(/[^A-Z]/g, "");
+    if (!code) { setCodeMsg("Írd be a kódot.", "bad"); return; }
+    if (SH.codes.includes(code)) { setCodeMsg("Ezt a kódot már beváltottad ezen az eszközön.", "bad"); return; }
+    const c = CODES[code];
+    if (!c) { setCodeMsg("Ez a kód nem érvényes. Ellenőrizd, hogy jól írtad-e be.", "bad"); return; }
+    SH.codes.push(code);
+    save();
+    if (c.apply) c.apply();
+    setCodeMsg(c.msg || "A kódot beváltottad.", "ok");
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (!$("#codeBg").hidden) { hideModal("#codeBg"); e.preventDefault(); }
+    else if (!$("#introBg").hidden) { closeIntro(); e.preventDefault(); }
+  });
+}
+
 // ---- indulás -------------------------------------------------------------------
 buildTree();
 buildHlRows();
 buildHoloParts();
 bindControls();
+bindQuizSettings();
+syncQuizSettings();
+bindModals();
+resetScroll();
+if (!SH.introHidden) showModal("#introBg", $("#introClose"));
 syncControls();
 resize();
 const startId = decodeURIComponent((location.hash || "").slice(1));

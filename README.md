@@ -58,9 +58,18 @@ megtekintéséhez.
 - **Csillagozás:** a lista elemei csillaggal megjelölhetők. A kereső
   melletti csillaggal a csillagozott molekulák a lista elejére kerülnek.
 - **Tippelő (gyakorlás):** fent átkapcsolható. Véletlenszerűen ad egy
-  molekulát a csillagozottak közül (ha nincs legalább kettő, az összesből), és
-  ki kell választani, melyik az. Minden nézet és beállítás itt is használható;
-  a pontszámot a böngésző megjegyzi.
+  molekulát a kijelöltek közül, és ki kell választani, melyik az (a
+  lehetőségek alatt az összegképlet látszik). A bal oldali listában X-szel
+  jelölöd ki, miből kérdezzen (elsőre a csillagozottak vannak kijelölve), vagy
+  kérdezhet az összesből. Saját beállításai vannak: a kérdések nézete (3D, 2D,
+  vegyesen – kérdés közben nem váltható), a válaszlehetőségek száma és hogy
+  hány férjen egy sorba. A megjelenítési beállításokat a nézegetőtől veszi át,
+  de külön állíthatók. A pontszámot a böngésző megjegyzi.
+- **Nyitóablak** rövid leírással (eszközönként kikapcsolható), fent
+  **Redeem code** (kódbeváltás) és **Report bugs** (hibabejelentés).
+
+A változások listája: [CHANGELOG.md](CHANGELOG.md). Hibát itt jelezhetsz:
+[Issues](https://github.com/szekelygyorgygyuri-arch/Szenhidrat-n-zeget-bioszra/issues).
 - **Hologram:** a másik modell áttetsző rávetítése ugyanazokkal a színekkel.
   2D nézetben a valódi térbeli alakot, 3D nézetben a papírmodellt mutatja.
   A hologramon külön ki/be kapcsolható a C-váz, az OH-csoportok, a
