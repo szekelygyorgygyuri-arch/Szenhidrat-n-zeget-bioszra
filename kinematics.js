@@ -423,17 +423,20 @@ export function makeStatic(X, bonds) {
 export function makeGrowth({ X, bonds, resi, order, dirs }) {
   const N = X.length / 3;
   const n = order.length;
-  const rank = new Int32Array(Math.max(...order) + 1);
-  order.forEach((r, q) => { rank[r] = q; });
-  const win = (r) => {
-    const q = rank[r];
-    return q === 0 ? null : [(q - 1) / (n - 1), q / (n - 1)];
-  };
+  const R = Math.max(...order) + 1;
+  // egységenként az az időablak, amelyben az egység a helyére kerül (az elsőnél nincs ilyen)
+  const has = new Uint8Array(R), w0 = new Float64Array(R), w1 = new Float64Array(R);
+  order.forEach((r, q) => {
+    if (q === 0) return;
+    has[r] = 1;
+    w0[r] = (q - 1) / (n - 1);
+    w1[r] = q / (n - 1);
+  });
   function frame(t, out = new Float64Array(N * 3)) {
     for (let i = 0; i < N; i++) {
-      const w = win(resi[i]);
-      const s = w ? ease(clamp01((t - w[0]) / (w[1] - w[0]))) : 1;
-      const d = dirs[resi[i]];
+      const r = resi[i];
+      const s = has[r] ? ease(clamp01((t - w0[r]) / (w1[r] - w0[r]))) : 1;
+      const d = dirs[r];
       const k = (1 - s) * 2.6;
       out[3 * i] = X[3 * i] + d[0] * k;
       out[3 * i + 1] = X[3 * i + 1] + d[1] * k;
@@ -442,8 +445,8 @@ export function makeGrowth({ X, bonds, resi, order, dirs }) {
     return out;
   }
   const atomAlpha = (t, i) => {
-    const w = win(resi[i]);
-    return w ? smooth(w[0], w[0] + (w[1] - w[0]) * 0.55, t) : 1;
+    const r = resi[i];
+    return has[r] ? smooth(w0[r], w0[r] + (w1[r] - w0[r]) * 0.55, t) : 1;
   };
   return {
     N, frame, atomAlpha,

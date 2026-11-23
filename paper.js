@@ -114,31 +114,77 @@ function slotXY(type, ang) {
  * csúszhatnak; a kötéshosszak és az eredeti elrendezés rugóként hatnak.
  */
 export function relaxPlanar(P, idx, bonds, el, fixed, vertical) {
+  const n = idx.length;
+  if (!n) return;
   const inSet = new Set(idx);
   const bl = bonds.filter(([i, j]) => inSet.has(i) && inSet.has(j)).map(([i, j]) => [i, j, len(sub(get(P, i), get(P, j)))]);
-  const bonded = new Set(bl.map(([i, j]) => (i < j ? `${i}-${j}` : `${j}-${i}`)));
+  // kötött párok: atomonként a kötött szomszédok (ezek között nincs taszítás)
+  const bondedTo = new Map();
+  for (const [i, j] of bl) {
+    if (!bondedTo.has(i)) bondedTo.set(i, []);
+    if (!bondedTo.has(j)) bondedTo.set(j, []);
+    bondedTo.get(i).push(j);
+    bondedTo.get(j).push(i);
+  }
+  const NONE = [];
+  const nbOf = idx.map((i) => bondedTo.get(i) || NONE);
+  const isH = idx.map((i) => el[i] === "H");
   const P0 = Float64Array.from(P);
-  const n = idx.length;
   const F = new Float64Array(P.length);
+  // Rácsos szomszédkeresés: csak a szomszédos cellák atomjait kell összevetni,
+  // így egy lépés nem n², hanem n-nel arányos idő (a nagy poliszacharidoknál ez a lényeg).
+  const CS = 1.3; // a legnagyobb taszítási távolság
+  const nxt = new Int32Array(n), cx = new Int32Array(n), cy = new Int32Array(n);
+  let head = new Int32Array(64);
   for (let it = 0; it < 400; it++) {
     F.fill(0);
     let worst = 0;
+    let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
     for (let a = 0; a < n; a++) {
-      const i = idx[a];
-      for (let b = a + 1; b < n; b++) {
-        const j = idx[b];
-        if (bonded.has(i < j ? `${i}-${j}` : `${j}-${i}`)) continue;
-        const hi = el[i] === "H", hj = el[j] === "H";
-        const dmin = hi && hj ? 0.95 : hi || hj ? 1.08 : 1.3;
-        let dx = P[3 * i] - P[3 * j], dy = P[3 * i + 1] - P[3 * j + 1];
-        let d = Math.hypot(dx, dy);
-        if (d >= dmin) continue;
-        if (d < 1e-4) { dx = ((i * 7 + j * 3) % 5) - 2 || 1; dy = 1; d = Math.hypot(dx, dy); dx /= d; dy /= d; d = 1e-4; } else { dx /= d; dy /= d; }
-        const f = (dmin - d) * 0.7;
-        worst = Math.max(worst, dmin - d);
-        F[3 * i] += dx * f; F[3 * i + 1] += dy * f;
-        F[3 * j] -= dx * f; F[3 * j + 1] -= dy * f;
+      const x = P[3 * idx[a]], y = P[3 * idx[a] + 1];
+      if (x < minx) minx = x;
+      if (x > maxx) maxx = x;
+      if (y < miny) miny = y;
+      if (y > maxy) maxy = y;
+    }
+    const gw = Math.floor((maxx - minx) / CS) + 1, gh = Math.floor((maxy - miny) / CS) + 1;
+    const cells = gw * gh;
+    const useGrid = Number.isFinite(cells) && cells <= 4e6;
+    if (useGrid) {
+      if (head.length < cells) head = new Int32Array(cells);
+      head.fill(-1, 0, cells);
+      for (let a = 0; a < n; a++) {
+        cx[a] = Math.floor((P[3 * idx[a]] - minx) / CS);
+        cy[a] = Math.floor((P[3 * idx[a] + 1] - miny) / CS);
+        const c = cx[a] + cy[a] * gw;
+        nxt[a] = head[c];
+        head[c] = a;
       }
+    }
+    const pair = (a, b) => {
+      const i = idx[a], j = idx[b];
+      if (nbOf[a].includes(j)) return;
+      const hi = isH[a], hj = isH[b];
+      const dmin = hi && hj ? 0.95 : hi || hj ? 1.08 : 1.3;
+      let dx = P[3 * i] - P[3 * j], dy = P[3 * i + 1] - P[3 * j + 1];
+      let d = Math.hypot(dx, dy);
+      if (d >= dmin) return;
+      if (d < 1e-4) { dx = ((i * 7 + j * 3) % 5) - 2 || 1; dy = 1; d = Math.hypot(dx, dy); dx /= d; dy /= d; d = 1e-4; } else { dx /= d; dy /= d; }
+      const f = (dmin - d) * 0.7;
+      if (dmin - d > worst) worst = dmin - d;
+      F[3 * i] += dx * f; F[3 * i + 1] += dy * f;
+      F[3 * j] -= dx * f; F[3 * j + 1] -= dy * f;
+    };
+    if (useGrid) {
+      for (let a = 0; a < n; a++) {
+        for (let gy = Math.max(0, cy[a] - 1); gy <= Math.min(gh - 1, cy[a] + 1); gy++) {
+          for (let gx = Math.max(0, cx[a] - 1); gx <= Math.min(gw - 1, cx[a] + 1); gx++) {
+            for (let b = head[gx + gy * gw]; b >= 0; b = nxt[b]) if (b > a) pair(a, b);
+          }
+        }
+      }
+    } else {
+      for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) pair(a, b);
     }
     for (const [i, j, L] of bl) {
       const dx = P[3 * i] - P[3 * j], dy = P[3 * i + 1] - P[3 * j + 1];
@@ -700,13 +746,22 @@ function jacobiMax(A) {
 
 /** A Mov koordinátákat merev mozgással a Ref-re illeszti (idx atomjai alapján). */
 export function alignOnto(Mov, Ref, idx, out = new Float64Array(Mov.length)) {
-  const cm = centroid(Mov, idx), cr = centroid(Ref, idx);
-  const Sx = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  // (képkockánként fut, ezért ideiglenes tömbök nélkül számol)
+  let mx = 0, my = 0, mz = 0, rx = 0, ry = 0, rz = 0;
   for (const i of idx) {
-    const m = sub(get(Mov, i), cm), r = sub(get(Ref, i), cr);
-    for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) Sx[a][b] += m[a] * r[b];
+    mx += Mov[3 * i]; my += Mov[3 * i + 1]; mz += Mov[3 * i + 2];
+    rx += Ref[3 * i]; ry += Ref[3 * i + 1]; rz += Ref[3 * i + 2];
   }
-  const [[xx, xy, xz], [yx, yy, yz], [zx, zy, zz]] = Sx;
+  const inv = 1 / idx.length;
+  mx *= inv; my *= inv; mz *= inv; rx *= inv; ry *= inv; rz *= inv;
+  let xx = 0, xy = 0, xz = 0, yx = 0, yy = 0, yz = 0, zx = 0, zy = 0, zz = 0;
+  for (const i of idx) {
+    const ax = Mov[3 * i] - mx, ay = Mov[3 * i + 1] - my, az = Mov[3 * i + 2] - mz;
+    const bx = Ref[3 * i] - rx, by = Ref[3 * i + 1] - ry, bz = Ref[3 * i + 2] - rz;
+    xx += ax * bx; xy += ax * by; xz += ax * bz;
+    yx += ay * bx; yy += ay * by; yz += ay * bz;
+    zx += az * bx; zy += az * by; zz += az * bz;
+  }
   const Nm = [
     [xx + yy + zz, yz - zy, zx - xz, xy - yx],
     [yz - zy, xx - yy - zz, xy + yx, zx + xz],
@@ -715,10 +770,11 @@ export function alignOnto(Mov, Ref, idx, out = new Float64Array(Mov.length)) {
   ];
   const [w, x, y, z] = jacobiMax(Nm);
   for (let i = 0; i < Mov.length / 3; i++) {
-    const v = sub(get(Mov, i), cm);
-    const tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]);
-    const r = [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)];
-    put(out, i, add(r, cr));
+    const v0 = Mov[3 * i] - mx, v1 = Mov[3 * i + 1] - my, v2 = Mov[3 * i + 2] - mz;
+    const tx = 2 * (y * v2 - z * v1), ty = 2 * (z * v0 - x * v2), tz = 2 * (x * v1 - y * v0);
+    out[3 * i] = v0 + w * tx + (y * tz - z * ty) + rx;
+    out[3 * i + 1] = v1 + w * ty + (z * tx - x * tz) + ry;
+    out[3 * i + 2] = v2 + w * tz + (x * ty - y * tx) + rz;
   }
   return out;
 }
@@ -751,8 +807,33 @@ export function polyLayout({ X3, el, bonds, resi, residues, bridges, root, order
       ? [[-1.2, 0.8, 0], [-1.2, -0.8, 0.3], [1.2, 0.8, 1.2], [1.2, -0.8, 1.2]]
       : [[-2.6, 0, 0], [2.6, 0, 1.5], [-2.0, 2.4, 0.9], [-2.0, -2.4, 0.9], [2.0, 2.4, 1.8], [2.0, -2.4, 1.8]];
     const anchors = spots.map(([dx, dy]) => add(exo ? Ob : Cx, [dx, dy, 0]));
-    const placedIdx = [];
-    for (let i = 0; i < N; i++) if (placed[i] && i !== br.o) placedIdx.push(i);
+    // a már elhelyezett atomok rácsba rendezve: az ütközésvizsgálat csak a szomszédos cellákat nézi
+    const CG = 2.2;
+    const grid = new Map();
+    const gkey = (gx, gy) => (gx + 32768) * 65536 + (gy + 32768);
+    for (let i = 0; i < N; i++) {
+      if (!placed[i] || i === br.o) continue;
+      const x = out[3 * i], y = out[3 * i + 1];
+      const key = gkey(Math.floor(x / CG), Math.floor(y / CG));
+      let cell = grid.get(key);
+      if (!cell) grid.set(key, (cell = []));
+      cell.push(x, y);
+    }
+    const clashAt = (x, y) => {
+      const gx0 = Math.floor(x / CG), gy0 = Math.floor(y / CG);
+      let s = 0;
+      for (let gx = gx0 - 1; gx <= gx0 + 1; gx++) {
+        for (let gy = gy0 - 1; gy <= gy0 + 1; gy++) {
+          const cell = grid.get(gkey(gx, gy));
+          if (!cell) continue;
+          for (let q = 0; q < cell.length; q += 2) {
+            const d = Math.hypot(x - cell[q], y - cell[q + 1]);
+            if (d < CG) s += (CG - d) ** 2;
+          }
+        }
+      }
+      return s;
+    };
     const pcx = parentRing.reduce((m, i) => m + out[3 * i], 0) / parentRing.length;
     let best = null;
     for (let k = 0; k < nSlots; k++) {
@@ -763,8 +844,8 @@ export function polyLayout({ X3, el, bonds, resi, residues, bridges, root, order
         const B = Float64Array.from(B0);
         flipUnit(B, pB, sx, sy);
         const dA = (bInfo ? bInfo.dir : -1) * sy;
-        const own = [];
-        for (let i = 0; i < N; i++) if (pB[i]) own.push(i);
+        const ownXY = [];
+        for (let i = 0; i < N; i++) if (pB[i]) ownXY.push(B[3 * i], B[3 * i + 1]);
         const ac = get(B, br.aC);
         const ringPts = ring.map((i) => get(B, i));
         const cy = ringPts.reduce((m, p) => m + p[1], 0) / ring.length;
@@ -786,13 +867,7 @@ export function polyLayout({ X3, el, bonds, resi, residues, bridges, root, order
           const dAc = len(sub(add(ac, delta), tgt));
           const dMin = Math.min(...ringPts.map((p) => len(sub(add(p, delta), tgt))));
           let clash = 0;
-          for (const i of own) {
-            const p = add(get(B, i), delta);
-            for (const j of placedIdx) {
-              const d = Math.hypot(p[0] - out[3 * j], p[1] - out[3 * j + 1]);
-              if (d < 2.2) clash += (2.2 - d) ** 2;
-            }
-          }
+          for (let q = 0; q < ownXY.length; q += 2) clash += clashAt(ownXY[q] + delta[0], ownXY[q + 1] + delta[1]);
           // a lánc balra haladjon (ne forduljon vissza)
           const ccx = ringPts.reduce((m, p) => m + p[0], 0) / ring.length + delta[0];
           const back = Math.max(0, ccx - (pcx - 2.0));
@@ -813,7 +888,44 @@ export function polyLayout({ X3, el, bonds, resi, residues, bridges, root, order
     }
   }
   checkAll(out, placed, N);
-  relaxRings(out, N, bonds, el, residues.map((x) => x.ring), bridges.map((b) => b.o));
+  const rings = residues.map((x) => x.ring), bridgeO = bridges.map((b) => b.o);
+  relaxRings(out, N, bonds, el, rings, bridgeO);
+  if (unhideBridges(out, el, bridges, residues)) relaxRings(out, N, bonds, el, rings, bridgeO);
   centerAll([out], N);
   return out;
+}
+
+/**
+ * Ha a kész rajzon egy (gyűrűk közötti) híd-O egy másik nehézatomra esik (pl. a
+ * szomszéd egység C5-jére vagy C6-jára), a két szénatom között szabad helyre
+ * tesszük. Az egységek helye nem változik. Igazat ad, ha mozdított valamit.
+ */
+function unhideBridges(out, el, bridges, residues) {
+  const N = el.length;
+  const nearest = (x, y, skip) => {
+    let d = Infinity;
+    for (let i = 0; i < N; i++) {
+      if (el[i] === "H" || skip.includes(i)) continue;
+      d = Math.min(d, Math.hypot(out[3 * i] - x, out[3 * i + 1] - y));
+    }
+    return d;
+  };
+  let moved = false;
+  for (const b of bridges) {
+    if (!residues[b.parent].ring.includes(b.cx)) continue; // az exociklusos (pl. 1→6) hidat a szülő rajza adja
+    const skip = [b.o, b.cx, b.aC];
+    const ox = out[3 * b.o], oy = out[3 * b.o + 1];
+    if (nearest(ox, oy, skip) >= 0.8) continue;
+    const mx = (out[3 * b.cx] + out[3 * b.aC]) / 2, my = (out[3 * b.cx + 1] + out[3 * b.aC + 1]) / 2;
+    let best = null, far = -1;
+    for (const dy of [0.9, -0.9, 0, 0.5, -0.5, 1.3, -1.3]) {
+      const d = nearest(mx, my + dy, skip);
+      if (d > far + 1e-9) { far = d; best = my + dy; }
+      if (d >= 1.0) break;
+    }
+    out[3 * b.o] = mx;
+    out[3 * b.o + 1] = best;
+    moved = true;
+  }
+  return moved;
 }

@@ -57,23 +57,44 @@ megtekintéséhez.
   egység C4′ atomja között); a 3D képen a híd-O mellett is látszik.
 - **Csillagozás:** a lista elemei csillaggal megjelölhetők. A kereső
   melletti csillaggal a csillagozott molekulák a lista elejére kerülnek.
-- **Tippelő (gyakorlás):** fent átkapcsolható. Véletlenszerűen ad egy
-  molekulát a kijelöltek közül, és ki kell választani, melyik az (a
-  lehetőségek alatt az összegképlet látszik). A bal oldali listában X-szel
-  jelölöd ki, miből kérdezzen (elsőre a csillagozottak vannak kijelölve), vagy
-  kérdezhet az összesből. Saját beállításai vannak: a kérdések nézete (3D, 2D,
-  vegyesen – kérdés közben nem váltható), a válaszlehetőségek száma és hogy
-  hány férjen egy sorba. A megjelenítési beállításokat a nézegetőtől veszi át,
-  de külön állíthatók. A pontszámot a böngésző megjegyzi.
-- **Nyitóablak** rövid leírással (eszközönként kikapcsolható), fent
-  **Redeem code** (kódbeváltás) és **Report bugs** (hibabejelentés).
-
-A változások listája: [CHANGELOG.md](CHANGELOG.md). Hibát itt jelezhetsz:
-[Issues](https://github.com/szekelygyorgygyuri-arch/Szenhidrat-n-zeget-bioszra/issues).
 - **Hologram:** a másik modell áttetsző rávetítése ugyanazokkal a színekkel.
   2D nézetben a valódi térbeli alakot, 3D nézetben a papírmodellt mutatja.
   A hologramon külön ki/be kapcsolható a C-váz, az OH-csoportok, a
   H-atomok, a ficak és a kamuficak, és állítható az átlátszósága.
+- **Tippelő (gyakorlás):** fent átkapcsolható. Véletlenszerűen ad egy molekulát
+  a kijelöltek közül, és ki kell választani, melyik az.
+  - A bal oldali listában X-szel jelölöd ki, miből kérdezzen (elsőre a
+    csillagozottak vannak kijelölve), vagy kérdezhet az összesből is.
+  - Kérheted, hogy a D/L konfigurációt, a gyűrű tagszámát (5 vagy 6) és az
+    anomert (α/β) is meg kelljen adni, ahol ez értelmezhető.
+    - A válaszra kattintva egy kis menüben kell kiválasztani őket, és ott
+      látszik a molekula teljes neve is (pl. α-D-glükopiranóz).
+    - A válasz csak akkor helyes, ha minden része jó.
+  - Saját beállításai vannak:
+    - a kérdések nézete (3D, 2D vagy vegyesen; kérdés közben nem váltható);
+    - a válaszlehetőségek száma, és hány férjen egy sorba;
+    - az összegképlet a lehetőségek alatt;
+    - a gyűrűzáródás animációja (kikapcsolható).
+  - A megjelenítési beállításokat a nézegetőtől veszi át, de külön állíthatók.
+  - A pontszámot a böngésző megjegyzi.
+- **Elrendezés:** a két oldalsó panel a felső sáv gombjaival elrejthető.
+  - A széle húzásával átméretezhető; nagyon keskenyre húzva eltűnik, dupla
+    kattintással visszaáll alapméretre.
+  - Elrejtve a panel fiókként csúszik be.
+  - A 3D-tér sarkában van a **Nagy nézet** (felső sáv és panelek nélkül) és a
+    teljes képernyő gombja. Ez digitális táblán vagy erősen nagyított
+    böngészőben is jól használható.
+  - Alacsony ablakban a fejléc tömörebb, a leírás az „i” gombbal nyitható.
+- **Nyitóablak** rövid leírással (eszközönként kikapcsolható), fent
+  **Redeem code** (kódbeváltás) és **Report bugs** (hibabejelentés).
+- **Fejlesztői mód** (kóddal kapcsolható be).
+  - A Tippelőben jelöli a jó választ.
+  - A **Debugger** a kijelölt csoportok minden molekuláján és formáján
+    végigkapcsolja a nézeteket (3D/2D, nyílt/zárt, hologram ki/be) a megadott
+    időközönként, és közben ellenőrzi a modelleket.
+
+A változások listája: [CHANGELOG.md](CHANGELOG.md). Hibát itt jelezhetsz:
+[Issues](https://github.com/szekelygyorgygyuri-arch/Szenhidrat-n-zeget-bioszra/issues).
 
 ## Megnyitás
 
