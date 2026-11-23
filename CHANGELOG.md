@@ -1,5 +1,17 @@
 # Változások (changelog)
 
+## 1.5 – 2026-11-23
+
+### Javítva
+- A Tippelő nem indult el, ha még nem volt csillagozott (X-szel kijelölt)
+  molekula: csak egy figyelmeztetés jelent meg, kérdés nem. Most ilyenkor az
+  összes molekulából kérdez, és kiírja, hogyan lehet X-szel szűkíteni.
+
+### Új
+- A Tippelő beállításaiban kikapcsolható az összegképlet a felajánlott
+  molekulák neve alatt.
+- Credits (készítők) szekció a leírásban.
+
 ## 1.4 – 2026-11-23
 
 ### Javítva

@@ -132,6 +132,13 @@ python3 tools/generate_data.py
   térállásból adódnak. A hologramot merev illesztés (Horn-módszer) teszi
   pontosan a fő modellre.
 
+## Készítők (Credits)
+
+- **Fejlesztő:** Claude (Anthropic)
+- **Tervező:** Székely György
+- **Playtesterek:** –
+- **Mental supporter:** –
+
 ## Licenc
 
 © 2026 szekelygyorgygyuri-arch. Minden jog fenntartva (All rights reserved).

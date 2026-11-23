@@ -73,7 +73,7 @@ const DEFAULTS = {
 const SH_DEFAULTS = {
   fav: [], favFirst: false, xset: null, xFirst: false, score: { ok: 0, total: 0 },
   introHidden: false, codes: [],
-  quiz: { view: "3d", source: "x", count: 4, perRow: 0 },
+  quiz: { view: "3d", source: "x", count: 4, perRow: 0, formula: true },
 };
 const HOLO_PARTS = [
   { key: "C", name: "C-váz" },
@@ -1039,7 +1039,10 @@ function shuffle(a) {
 /** A kérdések köre: az X-elt molekulák, vagy (ha úgy állítod) az összes. */
 function quizPool() {
   if (SH.quiz.source === "all") return { ids: ALL_IDS, all: true };
-  return { ids: (SH.xset || []).filter((id) => recOf(id)), all: false };
+  const ids = (SH.xset || []).filter((id) => recOf(id));
+  // ha nincs legalább két kijelölt molekula, az összesből kérdez (így mindig elindul)
+  if (ids.length < 2) return { ids: ALL_IDS, all: true, fallback: true };
+  return { ids, all: false };
 }
 const optionCount = (pool) => Math.max(2, Math.min(SH.quiz.count || 4, pool.ids.length));
 function quizNew() {
@@ -1103,11 +1106,11 @@ function renderQuiz() {
   if (!Q.on) return;
   const pool = quizPool();
   $("#qScore").textContent = `Helyes: ${SH.score.ok} / ${SH.score.total}`;
-  $("#qPool").textContent = pool.all
-    ? `Az összes (${pool.ids.length}) molekulából kérdezek, ${optionCount(pool)} lehetőséggel.`
-    : pool.ids.length >= 2
-      ? `A ${pool.ids.length} kijelölt (X) molekulából kérdezek, ${optionCount(pool)} lehetőséggel.`
-      : "";
+  $("#qPool").textContent = pool.fallback
+    ? `Még nincs legalább két X-szel kijelölt molekula, ezért az összes (${pool.ids.length}) molekulából kérdezek. A bal oldali listában X-szel szűkítheted.`
+    : pool.all
+      ? `Az összes (${pool.ids.length}) molekulából kérdezek, ${optionCount(pool)} lehetőséggel.`
+      : `A ${pool.ids.length} kijelölt (X) molekulából kérdezek, ${optionCount(pool)} lehetőséggel.`;
   $("#qOpts").innerHTML = "";
   if (Q.empty || pool.ids.length < 2) {
     $("#qMsg").textContent = "Jelölj ki X-szel legalább két molekulát a bal oldali listában, vagy a beállításoknál válaszd, hogy az összesből kérdezzen.";
@@ -1122,7 +1125,9 @@ function renderQuiz() {
     b.dataset.id = id;
     b.innerHTML = `<span></span><small></small>`;
     b.querySelector("span").textContent = r.name;
-    b.querySelector("small").textContent = r.formula; // összegképlet a név alatt
+    // összegképlet a név alatt (a tippelő beállításaiban kikapcsolható)
+    if (SH.quiz.formula !== false) b.querySelector("small").textContent = r.formula;
+    else b.querySelector("small").remove();
     if (Q.answered) {
       b.disabled = true;
       if (id === Q.id) b.classList.add("ok");
@@ -1195,6 +1200,7 @@ function syncQuizSettings() {
     : "Előbb jelölj ki legalább két molekulát.";
   cnt.disabled = pool.ids.length < 3;
   $("#qsPerRow").value = String(c.perRow || 0);
+  $("#qsFormula").checked = c.formula !== false;
 }
 function bindQuizSettings() {
   $("#qsView").addEventListener("click", (e) => {
@@ -1216,6 +1222,10 @@ function bindQuizSettings() {
     save(); syncQuizSettings();
   });
   $("#qsCount").addEventListener("change", () => { if (Q.on && !Q.answered) quizNew(); });
+  $("#qsFormula").addEventListener("change", (e) => {
+    SH.quiz.formula = e.target.checked;
+    save(); renderQuiz();
+  });
   $("#qsPerRow").addEventListener("change", (e) => {
     SH.quiz.perRow = +e.target.value;
     save(); layoutOptions();
@@ -1371,7 +1381,8 @@ function polyCaption() {
     const k = model.progress(t);
     return `<span class="phase">${k}.</span><b>Lánchosszabbítás:</b> a ${k}. egység kapcsolódik (${n} közül). A lánc a nem redukáló vég${r.residues.some((x) => x.parent >= 0 && r.residues.filter((y) => y.parent === x.parent).length > 1) ? "ek" : ""} felé nő.`;
   }
-  return `<b>${hideName(r.name)} – ${n} egységes részlet.</b> ${hideName(r.bondtext)}. A valódi molekula: ${r.real || "sok száz–sok ezer egység"}.`;
+  const bonds = quizHidden() ? "" : ` ${r.bondtext}.`;
+  return `<b>${hideName(r.name)} – ${n} egységes részlet.</b>${bonds} A valódi molekula: ${r.real || "sok száz–sok ezer egység"}.`;
 }
 
 function caption() {
