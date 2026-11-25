@@ -77,6 +77,25 @@ megtekintéséhez.
     - a gyűrűzáródás animációja (kikapcsolható).
   - A megjelenítési beállításokat a nézegetőtől veszi át, de külön állíthatók.
   - A pontszámot a böngésző megjegyzi.
+- **Analizáló:** fent átkapcsolható. Egy véletlenszerű, gyűrűs formájú mono-
+  vagy diszacharidot ad, teljesen szürkén, és mindent neked kell rajta
+  megadni.
+  - Atomokra kattintva fel kell iratozni őket: elem, sorszám (az O és a H a
+    szénatomjáét kapja), diszacharidnál az egység (′), valamint a szerep
+    (glikozidos OH, gyűrű-O, ficak, kamuficak, a glikozidos kötés O-ja).
+  - A 3D-tér fölött meg kell adni a D/L konfigurációt, a gyűrű tagszámát és az
+    anomert. Diszacharidnál ezt mindkét egységre, továbbá a glikozidos kötés
+    típusát (ez kikapcsolható) és hogy redukáló-e.
+  - A nevet és az összegképletet kereshető lenyíló listából kell kiválasztani.
+  - A Kiértékelés megmutatja, mi volt jó (zöld) és mi nem (piros, mellette a
+    helyes válasz).
+  - A bal oldali listában karikával jelölöd ki, miből válasszon (elsőre a
+    csillagozottak vannak bekarikázva).
+  - Beállítható, hogy a H-atomokat és a sima OH-csoportokat fel kell-e
+    iratozni, meg vannak-e adva, vagy rejtve legyenek, valamint a nézet.
+  - Egyelőre csak gyűrűs formájú mono- és diszacharidok szerepelnek, ezért itt
+    nincs animáció.
+- **Redukáló-e:** a nézegetőben minden molekulánál látszik, rövid magyarázattal.
 - **Elrendezés:** a két oldalsó panel a felső sáv gombjaival elrejthető.
   - A széle húzásával átméretezhető; nagyon keskenyre húzva eltűnik, dupla
     kattintással visszaáll alapméretre.
@@ -88,10 +107,16 @@ megtekintéséhez.
 - **Nyitóablak** rövid leírással (eszközönként kikapcsolható), fent
   **Redeem code** (kódbeváltás) és **Report bugs** (hibabejelentés).
 - **Fejlesztői mód** (kóddal kapcsolható be).
-  - A Tippelőben jelöli a jó választ.
-  - A **Debugger** a kijelölt csoportok minden molekuláján és formáján
-    végigkapcsolja a nézeteket (3D/2D, nyílt/zárt, hologram ki/be) a megadott
-    időközönként, és közben ellenőrzi a modelleket.
+  - A Tippelőben és az Analizálóban narancssárga jelöli a jó választ.
+  - A **Debugger** a nézegetőben fut. A lista sorrendjében végigmegy a kijelölt
+    csoportok molekuláin:
+    - mindegyiket megjeleníti és lejátssza az animációt;
+    - a jobb oldali beállításokat fentről lefelé egyenként átállítja és
+      visszaállítja;
+    - a végén minden színt narancsra cserél, majd vissza.
+  - Két lépés között a megadott ideig vár, és közben ellenőrzi a modelleket.
+  - Választható: csak 3D, csak 2D vagy mindkettő; visszaállítás lépésenként
+    vagy egyszerre a molekula végén; a hologram beállításain is végigmenjen-e.
 
 A változások listája: [CHANGELOG.md](CHANGELOG.md). Hibát itt jelezhetsz:
 [Issues](https://github.com/szekelygyorgygyuri-arch/Szenhidrat-n-zeget-bioszra/issues).

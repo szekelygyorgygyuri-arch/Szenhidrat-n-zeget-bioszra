@@ -165,7 +165,7 @@ details.lvl2 > summary:hover, details.lvl1 > summary:hover { background: color-m
 .stage { display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
 .stage-head { display: flex; align-items: flex-start; gap: 12px; padding: 14px 18px 10px; border-bottom: 1px solid var(--line); }
 .title-block { min-width: 0; flex: 1; }
-.eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .title-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
 h1 { margin: 0; font: 600 24px/1.15 var(--font-display); letter-spacing: -.015em; text-wrap: balance; }
 .alt { color: var(--muted); font-size: 14px; }
@@ -331,6 +331,88 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 50%; }
 .app.quiz-mode .items .star, .app.quiz-mode .item .meta { display: none; }
 .app.quiz-mode .item[aria-current="true"] { background: transparent; color: inherit; }
 .app:not(.quiz-mode) .quiz-only, .app.quiz-mode .view-only { display: none; }
+/* analizáló: karikás kijelölés a listában, saját beállítások, rejtett nézegető-részek */
+.obtn {
+  flex: none; width: 34px; height: 30px; border: 0; border-radius: 7px; background: transparent;
+  display: none; place-items: center; color: var(--line);
+}
+.om { fill: none; stroke: currentColor; stroke-width: 2.6; }
+.obtn:hover:not(:disabled) { color: var(--faint); }
+.obtn[aria-pressed="true"] { color: var(--accent); }
+.obtn[aria-pressed="true"] .om { fill: color-mix(in srgb, var(--accent) 22%, transparent); }
+.obtn:disabled { opacity: .3; cursor: not-allowed; }
+.app.ana-mode .obtn { display: grid; }
+.app.ana-mode .items .star, .app.ana-mode .item .meta { display: none; }
+.app.ana-mode .item[aria-current="true"] { background: transparent; color: inherit; }
+.app.ana-mode .star-filter[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+.app:not(.ana-mode) .ana-only, .app.ana-mode .ana-hide, .app.ana-mode .view-only { display: none; }
+.app.ana-mode #holoQ, .app.ana-mode .tl-row, .app.ana-mode #tlTabs { display: none; }
+/* az analizáló felső része */
+.ana-form { display: grid; gap: 6px; }
+.ana-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.ana-row .rlab { font: 600 12px var(--font-ui); color: var(--ink); min-width: 78px; }
+.ana-field { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.ana-field > .lab { font-size: 12px; color: var(--muted); }
+.ana-units { display: grid; grid-template-columns: auto minmax(130px, auto) auto auto auto; gap: 4px 12px; align-items: center; justify-content: start; overflow-x: auto; }
+/* az analizáló válaszrésze a módváltó alatt, teljes szélességben */
+.app.ana-mode .stage-head { flex-wrap: wrap; }
+.app.ana-mode #ana { flex-basis: 100%; order: 5; }
+.ana-units .rlab, .ana-row .rlab { white-space: nowrap; }
+.ana-units .uh { font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.ana-units .cell > .lab { display: none; }
+.ana-units .cell .truth:empty { display: none; }
+.ana-toggle { display: none; justify-self: start; }
+@media (max-width: 720px) {
+  /* telefonon az adatok összecsukhatók, hogy a molekula is látsszon */
+  .ana-toggle { display: inline-flex; }
+  .ana.collapsed #aForm { display: none; }
+}
+@media (max-width: 640px) {
+  /* keskeny kijelzőn egységenként új sor, a mezők előtt a saját felirattal */
+  .ana-units { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+  .ana-units .uh { display: none; }
+  .ana-units .rlab { flex-basis: 100%; margin-top: 2px; }
+  .ana-units .cell > .lab { display: inline; }
+}
+.ana-field .truth { font-size: 11.5px; color: var(--good-ink); font-weight: 600; }
+.seg.mini-seg { width: auto; }
+.seg.mini-seg button { flex: none; padding: 4px 10px; }
+.seg button.ok { background: var(--good) !important; color: #fff !important; opacity: 1 !important; }
+.seg button.bad { background: var(--bad) !important; color: #fff !important; opacity: 1 !important; }
+.seg button.dev-ok { box-shadow: inset 0 0 0 2px var(--dev); }
+.combo-btn {
+  display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 150px; max-width: 260px;
+  padding: 5px 9px; border-radius: 9px; border: 1px solid var(--line); background: var(--raised); font-size: 12.5px; text-align: left;
+}
+.combo-btn .v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.combo-btn.empty .v { color: var(--faint); }
+.combo-btn:hover:not(:disabled) { border-color: var(--accent); }
+.combo-btn:disabled { cursor: default; }
+.ana-field.ok .combo-btn { border-color: var(--good); background: var(--good-soft); color: var(--good-ink); }
+.ana-field.bad .combo-btn { border-color: var(--bad); background: var(--bad-soft); color: var(--bad-ink); }
+/* kereshető lenyíló lista */
+.combo-pop {
+  position: fixed; z-index: 46; display: grid; gap: 6px; padding: 8px; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--line); box-shadow: 0 16px 44px rgba(0, 0, 0, .28);
+}
+.combo-search { width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); }
+.combo-list { list-style: none; margin: 0; padding: 0; max-height: min(300px, 45vh); overflow: auto; scrollbar-width: thin; }
+.combo-list li { padding: 6px 10px; border-radius: 7px; cursor: pointer; font-size: 13px; }
+.combo-list li:hover, .combo-list li.active { background: var(--accent-soft); }
+.combo-list li[aria-selected="true"] { font-weight: 600; color: var(--accent); }
+.combo-list li.none { color: var(--faint); cursor: default; background: none; }
+.combo-list li.dev-ok { box-shadow: inset 3px 0 0 var(--dev); color: var(--dev); font-weight: 600; }
+/* atom-feliratozó menü */
+.apop .seg.nums button { min-width: 30px; padding: 5px 4px; }
+.seg.wrap { flex-wrap: wrap; }
+.seg.wrap button { flex: 1 0 auto; }
+.qpop-row .lab small { color: var(--faint); font-size: 11px; }
+/* a feliratok a 3D-térben */
+.btn.dev-fill { color: var(--dev); border-color: color-mix(in srgb, var(--dev) 55%, var(--line)); }
+.lbl.ana { font-size: 10.5px; border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); }
+.lbl.ana.given { opacity: .7; }
+.lbl.ana.ok { border-color: var(--good); color: var(--good-ink); }
+.lbl.ana.bad { border-color: var(--bad); color: var(--bad-ink); font-weight: 600; }
 .app.quiz-mode .star-filter[aria-pressed="true"] { color: var(--bad); background: var(--bad-soft); }
 .small-btns { display: flex; flex-wrap: wrap; gap: 6px; }
 .small-btns .btn { padding: 5px 9px; font-size: 12px; }
@@ -558,6 +640,7 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
 /* ---------- reszponzív ---------- */
 @media (max-width: 1180px) {
   .app { --lw: 240px; --rw: 280px; }
+  .seg.mode button { padding: 5px 9px; }
 }
 /* alacsony ablak (pl. 1280×720, digitális tábla, nagyított böngésző): tömörebb fejléc és idővonal */
 @media (max-height: 800px) {
@@ -629,7 +712,7 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
 </head>
 <body>
 <header class="topbar">
-  <a class="ver" id="verLink" href="https://github.com/szekelygyorgygyuri-arch/Szenhidrat-n-zeget-bioszra/blob/main/CHANGELOG.md" target="_blank" rel="noopener">v1.6<span class="long"> · újdonságok</span></a>
+  <a class="ver" id="verLink" href="https://github.com/szekelygyorgygyuri-arch/Szenhidrat-n-zeget-bioszra/blob/main/CHANGELOG.md" target="_blank" rel="noopener">v1.7<span class="long"> · újdonságok</span></a>
   <div class="layout-btns" role="group" aria-label="Panelek">
     <button type="button" class="tbtn pnl" id="tglLeft" aria-pressed="true" title="A molekulalista (bal oldali panel) megjelenítése vagy elrejtése">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/></svg>
@@ -708,6 +791,7 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
       <div class="seg mode" id="segMode" role="group" aria-label="Mód">
         <button type="button" data-v="view" aria-pressed="true">Nézegető</button>
         <button type="button" data-v="quiz" aria-pressed="false">Tippelő</button>
+        <button type="button" data-v="ana" aria-pressed="false">Analizáló</button>
       </div>
       <section class="quiz" id="quiz" hidden aria-live="polite">
         <div class="quiz-top">
@@ -720,6 +804,22 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
         <div class="quiz-foot">
           <p class="quiz-msg" id="qMsg"></p>
           <button type="button" class="btn primary" id="qNext">Következő molekula</button>
+        </div>
+      </section>
+      <section class="quiz ana collapsed" id="ana" hidden aria-live="polite">
+        <div class="quiz-top">
+          <span class="eyebrow">Analizáló</span>
+          <span class="score" id="aScore"></span>
+        </div>
+        <h1>Elemezd a molekulát!</h1>
+        <p class="quiz-pool" id="aPool"></p>
+        <button type="button" class="btn ana-toggle" id="aToggle" aria-expanded="false" aria-controls="aForm">Adatok megadása</button>
+        <div class="ana-form" id="aForm"></div>
+        <div class="quiz-foot">
+          <p class="quiz-msg" id="aMsg"></p>
+          <button type="button" class="btn dev-fill" id="aFill" hidden title="Fejlesztői mód: minden feliratot és adatot kitölt a jó válasszal">Jó válaszok kitöltése</button>
+          <button type="button" class="btn" id="aNext">Másikat kérek</button>
+          <button type="button" class="btn primary" id="aCheck">Kiértékelés</button>
         </div>
       </section>
       <button class="drawer-btn right" id="openRight" type="button">
@@ -842,6 +942,50 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
         </div>
       </section>
 
+      <section class="sec ana-only" aria-labelledby="h-as">
+        <h3 id="h-as">Analizáló beállításai</h3>
+        <div class="field">
+          <span class="lab">Nézet</span>
+          <div class="seg" id="asView" role="group" aria-label="Nézet az analizálóban">
+            <button type="button" data-v="3d">3D</button>
+            <button type="button" data-v="paper">2D (papír)</button>
+            <button type="button" data-v="mix">Vegyesen</button>
+          </div>
+          <span class="hint">A változás a következő molekulától érvényes.</span>
+        </div>
+        <div class="field">
+          <span class="lab">Miből válasszon</span>
+          <div class="seg" id="asSource" role="group" aria-label="Miből válasszon">
+            <button type="button" data-v="o" id="asSourceO">Bekarikázottak</button>
+            <button type="button" data-v="all" id="asSourceAll">Összes</button>
+          </div>
+          <span class="hint">A bal oldali listában karikával jelölöd ki a molekulákat (elsőre a csillagozottak vannak bekarikázva). Egyelőre csak a gyűrűs formájú mono- és diszacharidok elemezhetők, ezért itt nincs animáció.</span>
+          <div class="small-btns">
+            <button type="button" class="btn" id="asFromFav">Csillagozottak bekarikázása</button>
+            <button type="button" class="btn" id="asClearO">Karikák törlése</button>
+          </div>
+        </div>
+        <div class="field">
+          <span class="lab">H-atomok</span>
+          <div class="seg" id="asH" role="group" aria-label="H-atomok">
+            <button type="button" data-v="label">Feliratozandó</button>
+            <button type="button" data-v="given">Megadva</button>
+            <button type="button" data-v="hidden">Rejtve</button>
+          </div>
+        </div>
+        <div class="field">
+          <span class="lab">Sima OH-csoportok</span>
+          <div class="seg" id="asOH" role="group" aria-label="Sima OH-csoportok">
+            <button type="button" data-v="label">Feliratozandó</button>
+            <button type="button" data-v="given">Megadva</button>
+            <button type="button" data-v="hidden">Rejtve</button>
+          </div>
+          <span class="hint">A nem kiemelt hidroxilcsoportok oxigénje és hidrogénje. A megadott atomok feliratát készen kapod, a rejtettek nem látszanak.</span>
+        </div>
+        <label class="toggle"><input type="checkbox" id="asBond"><span class="sw"></span><span class="tx">Diszacharidnál a kötés típusa is kötelező<small>pl. α(1→4)</small></span></label>
+        <p class="help">Feliratozás: kattints egy atomra, és válaszd ki az elemét, a sorszámát (az O és a H a szénatomjáé), diszacharidnál az egységét (′), végül a szerepét. A gyűrű-O annak a szénatomnak a számát kapja, amelynek OH-ja a gyűrűt zárta (pl. glükopiranóznál O5), a kötés-O pedig a második egységét (pl. maltóznál O4′).</p>
+      </section>
+
       <section class="sec view-only" aria-labelledby="h-view">
         <h3 id="h-view">Nézet</h3>
         <div class="seg" id="segView" role="group" aria-label="Nézet">
@@ -851,7 +995,7 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
         <p class="hint">A papírnézet úgy mutatja a molekulát, mint a nyomtatott tankönyv: egy síkban, a nyílt láncot Fischer-projekcióban, a gyűrűt Haworth-képletben. A lap ugyanúgy forgatható és színezhető.</p>
       </section>
 
-      <section class="sec" aria-labelledby="h-holo">
+      <section class="sec ana-hide" aria-labelledby="h-holo">
         <h3 id="h-holo">Hologram</h3>
         <label class="toggle"><input type="checkbox" id="holoOn"><span class="sw"></span><span class="tx">Hologram megjelenítése<small id="holoHint"></small></span></label>
         <div class="field">
@@ -864,7 +1008,7 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
         </div>
       </section>
 
-      <section class="sec" id="secForma" aria-labelledby="h-forma">
+      <section class="sec ana-hide" id="secForma" aria-labelledby="h-forma">
         <h3 id="h-forma">Forma</h3>
         <div class="field">
           <span class="lab">Konfiguráció</span>
@@ -890,13 +1034,13 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
         <p class="hint" id="formHint"></p>
       </section>
 
-      <section class="sec" aria-labelledby="h-hl">
+      <section class="sec ana-hide" aria-labelledby="h-hl">
         <h3 id="h-hl">Kiemelések</h3>
         <div id="hlRows" style="display:grid;gap:10px"></div>
         <label class="toggle"><input type="checkbox" id="hlOpen"><span class="sw"></span><span class="tx">Kiemelés a nyílt láncon is<small>A színek követik az atomokat a gyűrűzáródás alatt</small></span></label>
       </section>
 
-      <section class="sec" aria-labelledby="h-vis">
+      <section class="sec ana-hide" aria-labelledby="h-vis">
         <h3 id="h-vis">Láthatóság</h3>
         <label class="toggle"><input type="checkbox" id="showH"><span class="sw"></span><span class="tx">H-atomok</span></label>
         <label class="toggle"><input type="checkbox" id="showOH"><span class="sw"></span><span class="tx">Sima OH-csoportok<small>a nem kiemelt hidroxilcsoportok</small></span></label>
@@ -914,7 +1058,7 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
             <button type="button" data-v="sf">Kalotta</button>
           </div>
         </div>
-        <div class="field">
+        <div class="field ana-hide">
           <span class="lab">Atomok színe</span>
           <div class="el-colors">
             <label>C <input type="color" id="el-C" aria-label="Szénatom színe"></label>
@@ -927,7 +1071,7 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
         <label class="toggle"><input type="checkbox" id="autoRotate"><span class="sw"></span><span class="tx">Automatikus forgatás</span></label>
         <div class="btn-row">
           <button class="btn" id="resetView" type="button">Nézet alaphelyzetbe</button>
-          <button class="btn" id="resetColors" type="button">Alapszínek</button>
+          <button class="btn ana-hide" id="resetColors" type="button">Alapszínek</button>
         </div>
         <p class="help">Forgatás: húzás · Nagyítás: görgő vagy csippentés · Eltolás: jobb gomb vagy két ujj. Szóköz: lejátszás.</p>
       </section>
@@ -946,6 +1090,7 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
       <li><b>Jobb oldalt</b> színezheted a glikozidos OH-t, a gyűrű-O-t, a ficakot és a kamuficakot, és ki-be kapcsolhatod a H-atomokat és az OH-csoportokat.</li>
       <li>A <b>2D (papír)</b> nézet a tankönyvi Fischer- és Haworth-képletet mutatja; a <b>hologram</b> rávetíti a másik nézetet.</li>
       <li>Fent a <b>Tippelőben</b> gyakorolhatsz: a kijelölt molekulák közül kérdez, és kérheted, hogy a D/L-t, a gyűrűméretet és az α/β-t is meg kelljen adni.</li>
+      <li>Az <b>Analizálóban</b> egy szürke molekula minden atomját neked kell feliratozni, és megadni a formáját, a nevét és az összegképletét.</li>
       <li>A <b>panelek</b> a felső sáv gombjaival elrejthetők, a szélük húzásával átméretezhetők; a 3D-tér sarkában van a <b>nagy nézet</b> és a teljes képernyő (digitális táblához).</li>
     </ul>
     <div class="row">
@@ -983,11 +1128,48 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
   </div>
 </div>
 
+<!-- analizáló: egy atom feliratozása -->
+<div class="qpop apop" id="aPop" role="dialog" aria-modal="false" aria-labelledby="apTitle" hidden>
+  <div class="qpop-head">
+    <b id="apTitle">Melyik atom ez?</b>
+    <button type="button" class="qpop-x" id="apClose" aria-label="Bezárás">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+  </div>
+  <div class="qpop-row" data-k="el">
+    <span class="lab">Elem</span>
+    <div class="seg" role="group" aria-label="Elem"><button type="button" data-v="C">C</button><button type="button" data-v="O">O</button><button type="button" data-v="H">H</button><button type="button" data-v="N">N</button></div>
+  </div>
+  <div class="qpop-row" data-k="num">
+    <span class="lab">Sorszám <small>(az O és a H a szénatomjáé)</small></span>
+    <div class="seg nums" role="group" aria-label="Sorszám"><button type="button" data-v="1">1</button><button type="button" data-v="2">2</button><button type="button" data-v="3">3</button><button type="button" data-v="4">4</button><button type="button" data-v="5">5</button><button type="button" data-v="6">6</button><button type="button" data-v="7">7</button><button type="button" data-v="0" title="Nincs sorszáma (pl. az acetilcsoport atomjai)">–</button></div>
+  </div>
+  <div class="qpop-row" data-k="prime">
+    <span class="lab">Egység</span>
+    <div class="seg" role="group" aria-label="Egység"><button type="button" data-v="0">1. egység</button><button type="button" data-v="1">2. egység (′)</button></div>
+  </div>
+  <div class="qpop-row" data-k="role">
+    <span class="lab">Szerep</span>
+    <div class="seg wrap" role="group" aria-label="Szerep"><button type="button" data-v="none">nincs</button><button type="button" data-v="glyc">glikozidos OH</button><button type="button" data-v="ringO">gyűrű-O</button><button type="button" data-v="ficak">ficak</button><button type="button" data-v="kamu">kamuficak</button><button type="button" data-v="bridge">kötés-O</button></div>
+  </div>
+  <p class="qpop-name" id="apPreview" aria-live="polite"></p>
+  <div class="row">
+    <button type="button" class="btn" id="apClear">Felirat törlése</button>
+    <button type="button" class="btn primary" id="apOk" disabled>Kész</button>
+  </div>
+</div>
+
+<!-- kereshető lenyíló lista (név, összegképlet, kötés) -->
+<div class="combo-pop" id="comboPop" hidden>
+  <input type="search" class="combo-search" id="comboSearch" placeholder="Keresés…" autocomplete="off" spellcheck="false" aria-label="Keresés a listában" role="combobox" aria-expanded="true" aria-controls="comboList">
+  <ul class="combo-list" id="comboList" role="listbox" aria-label="Lehetőségek"></ul>
+</div>
+
 <!-- fejlesztői mód: hibakereső futtatás -->
 <div class="modal-bg" id="dbgBg" hidden>
   <form class="modal small dbg-modal" role="dialog" aria-modal="true" aria-labelledby="dbgTitle" id="dbgForm" novalidate>
     <h2 id="dbgTitle">Debugger</h2>
-    <p>Végigmegy a kijelölt csoportok molekuláin a nézegetőben, és minden formájukon (D/L, gyűrű, anomer, idővonal) átkapcsol mindent, majd vissza: 3D és 2D, nyílt és zárt forma, hologrammal és nélküle. Így szemmel követhető, hogy szétugrik-e valami; közben magától is ellenőrzi a modelleket.</p>
+    <p>A nézegetőben fut. A lista sorrendjében végigmegy a kijelölt csoportok molekuláin: mindegyiket megjeleníti, lejátssza az animációt, majd a jobb oldali beállításokat fentről lefelé egyenként átállítja és visszaállítja. A végén minden színt narancsra cserél, majd vissza. Két lépés között a megadott ideig vár, így szemmel követhető, hogy szétugrik-e valami; közben magától is ellenőrzi a modelleket.</p>
     <div class="dbg-setup" id="dbgSetup">
       <div class="field">
         <label class="lab" for="dbgSec">Idő két kapcsolás között (másodperc)</label>
@@ -1002,7 +1184,23 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
           <label class="chk acc"><input type="checkbox" id="dbgPoly" data-g="poly"><span id="dbgPolyT">Poliszacharidok</span></label>
         </div>
       </fieldset>
-      <label class="chk-line"><input type="checkbox" id="dbgPlay"> A nyílt → zárt váltáskor az animációt is lejátssza</label>
+      <div class="field">
+        <span class="lab">Nézet</span>
+        <div class="seg" id="dbgViews" role="group" aria-label="Nézet">
+          <button type="button" data-v="3d">Csak 3D</button>
+          <button type="button" data-v="paper">Csak 2D</button>
+          <button type="button" data-v="both">Mindkettő</button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="lab">Visszaállítás</span>
+        <div class="seg" id="dbgRestore" role="group" aria-label="Visszaállítás">
+          <button type="button" data-v="step">Lépésenként</button>
+          <button type="button" data-v="end">Egyszerre, a molekula végén</button>
+        </div>
+        <span class="hint">Lépésenként: átállít, vár, visszaállít, vár. Egyszerre: minden beállítást egymás után átállít (mindegyik után vár), és a molekula végén egyszerre állít vissza mindent; így majdnem feleannyi idő.</span>
+      </div>
+      <label class="chk-line"><input type="checkbox" id="dbgHolo"> A hologram beállításain is végigmegy</label>
       <p class="hint" id="dbgPlan"></p>
     </div>
     <div class="dbg-status" id="dbgStatus" hidden>

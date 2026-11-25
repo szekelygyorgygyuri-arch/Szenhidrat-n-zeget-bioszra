@@ -1,5 +1,43 @@
 # Változások (changelog)
 
+## 1.7 – 2026-11-25
+
+### Új
+- **Analizáló** – harmadik fül a Nézegető és a Tippelő mellett:
+  - Egy véletlenszerű, gyűrűs formájú mono- vagy diszacharidot kapsz, teljesen szürkén.
+  - Minden atomot fel kell iratozni. Egy atomra kattintva kis menüben választod ki:
+    - az elemét;
+    - a sorszámát (az O és a H a szénatomjáét kapja);
+    - diszacharidnál az egységét (′);
+    - a szerepét: glikozidos OH, gyűrű-O, ficak, kamuficak vagy a glikozidos kötés O-ja.
+  - A 3D-tér fölött meg kell adni a konfigurációt (D/L), a gyűrű tagszámát (5 vagy 6) és az anomert (α/β). Diszacharidnál ezt mindkét egységre, továbbá:
+    - a glikozidos kötés típusát (ez kikapcsolható);
+    - hogy redukáló-e.
+  - A nevet és az összegképletet kereshető lenyíló listából kell kiválasztani.
+  - A Kiértékelés megmutatja, melyik felirat és adat jó (zöld) és melyik nem (piros, mellette a helyes).
+  - A bal oldali listában karikával jelölöd ki, miből válasszon. Elsőre a csillagozottak vannak bekarikázva, az X-ek nem.
+  - Beállítható:
+    - hogy a H-atomokat és a sima OH-csoportokat fel kell-e iratozni, meg vannak-e adva, vagy rejtve legyenek;
+    - a nézet (3D, 2D vagy vegyesen).
+  - Egyelőre csak a gyűrűs formájú mono- és diszacharidok szerepelnek, ezért itt nincs animáció.
+- A nézegetőben minden molekulánál látszik, hogy redukáló-e, rövid magyarázattal.
+- Fejlesztői módban az Analizálóban is narancssárga jelöli a jó válaszokat, és egy gombbal kitölthető a megoldás.
+
+### Változott
+- Debugger:
+  - Csak a nézegetőben fut; más módból indítva oda vált, a végén pedig visszaáll.
+  - A lista sorrendjében megy végig a molekulákon. Mindegyiket megjeleníti és lejátssza az animációt.
+  - Utána a jobb oldali beállításokat fentről lefelé egyenként átállítja, majd visszaállítja. A végén minden színt narancsra cserél, majd vissza.
+  - Két lépés között a megadott ideig vár.
+  - Beállítható:
+    - nézet: csak 3D, csak 2D vagy mindkettő;
+    - visszaállítás: lépésenként, vagy egyszerre a molekula végén;
+    - a hologram beállításain is végigmenjen-e.
+
+### Javítva
+- Ha 1 vagy 5 molekula volt kijelölve, „A 1 …” helyett most „Az 1 …” a felirat.
+- A Tippelő kis menüjében a billentyűzetfókusz néha rossz helyre került.
+
 ## 1.6 – 2026-11-23
 
 ### Javítva

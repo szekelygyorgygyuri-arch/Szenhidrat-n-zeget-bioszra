@@ -35,6 +35,11 @@ const SUB1 = { aldo: "aldóz", keto: "ketóz", dezoxi: "dezoxicukor", amino: "am
 const SUBSCRIPT = "₀₁₂₃₄₅₆₇₈₉";
 const subNum = (n) => String(n).replace(/\d/g, (d) => SUBSCRIPT[d]);
 const GREEK = { a: "α", b: "β" };
+/** Névelő szám előtt: „az 1”, „az 5”, „az 50”, különben „a 2” (mondat elején nagybetűvel). */
+const azA = (n, cap) => {
+  const az = n === 1 || n === 5 || (n >= 50 && n < 60) || (n >= 500 && n < 600) || (n >= 1000 && n < 2000);
+  return cap ? (az ? "Az" : "A") : az ? "az" : "a";
+};
 
 const GROUPS = [
   { key: "glyc", name: "Glikozidos OH", hint: "az anomer C-atom OH-csoportja", color: "#f2b705" },
@@ -73,6 +78,10 @@ const DEFAULTS = {
 const SH_DEFAULTS = {
   fav: [], favFirst: false, xset: null, xFirst: false, score: { ok: 0, total: 0 },
   introHidden: false, codes: [], dev: false,
+  // analizáló: karikás kijelölés (elsőre a csillagozottak), beállítások, pontszám
+  oset: null, oFirst: false,
+  ana: { view: "3d", source: "o", h: "label", oh: "label", askBond: true },
+  anaScore: { ok: 0, total: 0, pts: 0, max: 0 },
   quiz: {
     view: "3d", source: "x", count: 4, perRow: 0, formula: true,
     // a molekula mellett ezeket is meg kell adni (ahol értelmezhető), és lehet-e animálni
@@ -80,7 +89,8 @@ const SH_DEFAULTS = {
   },
   // a panelek szélessége (null: alapméret), elrejtése és a nagy nézet
   layout: { lw: null, rw: null, hideL: false, hideR: false, focus: false },
-  dbg: { sec: 1, groups: { mono: true, di: false, poly: false }, play: false },
+  // hibakereső: másodperc, csoportok, nézet (3d/paper/both), visszaállítás (step/end), hologram beállításai
+  dbg: { sec: 1, groups: { mono: true, di: false, poly: false }, views: "both", restore: "step", holo: true },
 };
 const HOLO_PARTS = [
   { key: "C", name: "C-váz" },
@@ -414,7 +424,19 @@ function refreshHl() {
 }
 refreshHl();
 
+const GREY = new THREE.Color("#a4abb6");
 function atomColor(m, i, k, out) {
+  // analizáló: a molekula szürke; a feliratozott atomok a választott elem és szerep színét kapják
+  if (A.on && !A.done) {
+    const L = anaLabelOf(i);
+    if (!L) return out.copy(GREY);
+    out.copy(elColor[L.el] || elColor.C);
+    if (!L.role || L.role === "none" || !hlColor[L.role]) return out;
+    tmpC.copy(hlColor[L.role]);
+    if (L.el === "H") tmpC.lerp(WHITE, 0.45);
+    else if (L.el === "C") tmpC.lerp(BLACK, 0.16);
+    return out.copy(tmpC);
+  }
   const el = m.el[i];
   out.copy(elColor[el] || elColor.C);
   const g = m.groupOf[i];
@@ -426,6 +448,7 @@ function atomColor(m, i, k, out) {
 }
 
 function atomVisible(m, i) {
+  if (A.on) return anaState(i) !== "hidden"; // az analizáló saját H/OH-beállításai
   const el = m.el[i];
   if (el === "H" && !S.showH) return false;
   if (!S.showOH && m.ohSet.has(i)) return false;
@@ -599,7 +622,7 @@ class Layer {
       if (!mesh) return;
       let a = 1;
       if (ring.forming && m.kind === "closure") a = smooth(0.7, 0.95, t);
-      mesh.visible = S.ringFill && a > 0.01;
+      mesh.visible = S.ringFill && !anaMasked() && a > 0.01;
       if (!mesh.visible) return;
       const pos = mesh.geometry.attributes.position;
       let cx = 0, cy = 0, cz = 0;
@@ -641,7 +664,7 @@ function renderFrame() {
   const t = st.t;
   P = model.frame(t, P && P.length === model.N * 3 ? P : undefined);
   mainLayer.update(P, t, atomVisible);
-  const holoOn = !!(S.holo && ensureHolo() && holoModel.N === model.N);
+  const holoOn = !!(S.holo && !A.on && ensureHolo() && holoModel.N === model.N);
   holoLayer.setVisible(holoOn);
   if (holoOn) {
     HX = holoModel.frame(t, HX && HX.length === holoModel.N * 3 ? HX : undefined);
@@ -654,6 +677,18 @@ function buildLabels() {
   $("#labels").innerHTML = "";
   labelEls = [];
   const m = model;
+  if (A.on) {
+    // analizáló: minden atomnak lehet felirata (a felhasználóé, a megadott, ill. kiértékelés után a helyes)
+    for (let i = 0; i < m.N; i++) {
+      const el = document.createElement("span");
+      el.className = "lbl ana";
+      el.hidden = true;
+      $("#labels").appendChild(el);
+      labelEls.push({ i, el, ana: true, has: false });
+    }
+    refreshAnaLabels();
+    return;
+  }
   if (st.poly) {
     // poliszacharidnál csak a kötéseket jelöljük (a sok C-számozás áttekinthetetlen lenne)
     // a gyakori kötéstípusból csak egyet, a ritkábbakat (pl. elágazások) mindenhol
@@ -694,9 +729,10 @@ let labelEls = [];
 function updateLabels() {
   const w = viewport.clientWidth, h = viewport.clientHeight;
   const show = S.labels;
-  for (const { i, el, link, gate } of labelEls) {
+  for (const { i, el, link, gate, ana, has } of labelEls) {
     const hideLink = link && (quizHidden() || (gate !== undefined ? mainLayer.alpha[gate] < 0.6 : st.t < 0.6));
-    if (!show || !mainLayer.vis[i] || mainLayer.alpha[i] < 0.3 || hideLink) { el.hidden = true; continue; }
+    const on = ana ? has : show && !hideLink;
+    if (!on || !mainLayer.vis[i] || mainLayer.alpha[i] < 0.3) { el.hidden = true; continue; }
     vA.set(P[3 * i], P[3 * i + 1], P[3 * i + 2]).project(camera);
     if (vA.z > 1) { el.hidden = true; continue; }
     el.hidden = false;
@@ -712,7 +748,7 @@ function fitCamera() {
   const tv = Math.tan((camera.fov * Math.PI) / 360), th = tv * aspect;
   const pad = S.style === "sf" ? 1.7 : 0.75;
   let d = 0;
-  for (const t of [0, 0.35, 0.65, 1]) {
+  for (const t of A.on ? [1] : [0, 0.35, 0.65, 1]) {
     const X = model.frame(t);
     for (let i = 0; i < X.length; i += 3) {
       const x = Math.abs(X[i]) + pad, y = Math.abs(X[i + 1]) + pad, z = X[i + 2];
@@ -750,6 +786,10 @@ const STAR_SVG = `<svg class="st" width="16" height="16" viewBox="0 0 24 24" ari
 const X_SVG = `<svg class="xm" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5 19 19M19 5 5 19"/></svg>`;
 const isFav = (id) => SH.fav.includes(id);
 const isX = (id) => (SH.xset || []).includes(id);
+const O_SVG = `<svg class="om" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.2"/></svg>`;
+const isO = (id) => (SH.oset || []).includes(id);
+/** Az analizálóban (egyelőre) csak a gyűrűs formájú mono- és diszacharidok szerepelnek. */
+const anaEligible = (id) => (MONO.has(id) && MONO.get(id).v.length > 0) || DI.has(id);
 const ALL_IDS = [...DATA.monos.map((m) => m.id), ...DATA.dis.map((d) => d.id), ...POLYS.map((p) => p.id)];
 const recOf = (id) => MONO.get(id) || DI.get(id) || POLY.get(id);
 const kindOf = (id) => (MONO.has(id) ? "mono" : DI.has(id) ? "di" : "poly");
@@ -786,7 +826,18 @@ function itemButton(id, name, meta, metaMono, search) {
   x.setAttribute("aria-label", `${name} kijelölése a tippelőhöz`);
   x.title = "Kijelölés a tippelőhöz";
   x.innerHTML = X_SVG;
-  li.append(b, s, x);
+  // az analizálóban karikával jelöljük ki, miből kérdezzen
+  const o = document.createElement("button");
+  o.type = "button";
+  o.className = "obtn";
+  o.dataset.o = id;
+  const ok = anaEligible(id);
+  o.disabled = !ok;
+  o.setAttribute("aria-pressed", String(ok && isO(id)));
+  o.setAttribute("aria-label", `${name} bekarikázása az analizálóhoz`);
+  o.title = ok ? "Bekarikázás az analizálóhoz" : "Az analizálóban egyelőre csak gyűrűs mono- és diszacharidok vannak";
+  o.innerHTML = O_SVG;
+  li.append(b, s, x, o);
   return li;
 }
 const monoItem = (m) => itemButton(m.id, m.name, m.alt || m.formula, !m.alt, `${m.name} ${m.alt} ${m.id}`);
@@ -816,13 +867,13 @@ function buildTree() {
   const nav = $("#tree");
   const openState = new Map($$("#tree details.grp").map((d) => [d.dataset.key, d.open]));
   nav.innerHTML = "";
-  // Csillagozottak (a tippelőben: X-eltek) előre, ha a kereső melletti gomb be van kapcsolva
-  const marked = Q.on ? isX : isFav;
-  if (Q.on ? SH.xFirst : SH.favFirst) {
+  // Csillagozottak (a tippelőben: X-eltek, az analizálóban: bekarikázottak) előre, ha a kereső melletti gomb be van kapcsolva
+  const marked = Q.on ? isX : A.on ? isO : isFav;
+  if (Q.on ? SH.xFirst : A.on ? SH.oFirst : SH.favFirst) {
     const fm = DATA.monos.filter((m) => marked(m.id)), fd = DIS_SORTED.filter((d) => marked(d.id));
     const fp = POLYS.filter((p) => marked(p.id));
-    const fav = details("lvl1 fav", Q.on ? "Kijelöltek (X)" : "Csillagozottak",
-      `<span class="count">${fm.length + fd.length + fp.length}</span>`, true, Q.on ? "xfav" : "fav");
+    const fav = details("lvl1 fav", Q.on ? "Kijelöltek (X)" : A.on ? "Bekarikázottak" : "Csillagozottak",
+      `<span class="count">${fm.length + fd.length + fp.length}</span>`, true, Q.on ? "xfav" : A.on ? "ofav" : "fav");
     if (fm.length) subList(fav, "Monoszacharidok", fm.map(monoItem));
     if (fd.length) subList(fav, "Diszacharidok", fd.map(diItem));
     if (fp.length) subList(fav, "Poliszacharidok", fp.map(polyItem));
@@ -831,7 +882,9 @@ function buildTree() {
       p.className = "empty";
       p.textContent = Q.on
         ? "Még nincs kijelölt molekula. A nevek melletti X-szel jelölheted ki, miből kérdezzen."
-        : "Még nincs csillagozott molekula. A nevek melletti csillaggal jelölheted meg őket.";
+        : A.on
+          ? "Még nincs bekarikázott molekula. A nevek melletti karikával jelölheted ki, mit kérjen elemzésre."
+          : "Még nincs csillagozott molekula. A nevek melletti csillaggal jelölheted meg őket.";
       fav.appendChild(p);
     }
     nav.appendChild(fav);
@@ -888,7 +941,7 @@ function buildTree() {
 }
 
 function markCurrent() {
-  for (const b of $$(".item")) b.setAttribute("aria-current", String(!Q.on && !!st.rec && b.dataset.id === st.rec.id));
+  for (const b of $$(".item")) b.setAttribute("aria-current", String(!Q.on && !A.on && !!st.rec && b.dataset.id === st.rec.id));
 }
 
 function toggleFav(id) {
@@ -911,6 +964,23 @@ function toggleX(id) {
   else $$(`.xbtn[data-x="${id}"]`).forEach((b) => b.setAttribute("aria-pressed", String(isX(id))));
   syncQuizSettings();
   renderQuiz();
+}
+function toggleO(id) {
+  if (!anaEligible(id)) return;
+  if (!SH.oset) SH.oset = [];
+  const i = SH.oset.indexOf(id);
+  if (i >= 0) SH.oset.splice(i, 1);
+  else SH.oset.push(id);
+  save();
+  if (SH.oFirst) buildTree();
+  else $$(`.obtn[data-o="${id}"]`).forEach((b) => b.setAttribute("aria-pressed", String(isO(id))));
+  syncAnaSettings();
+}
+function setOset(ids) {
+  SH.oset = ids.filter(anaEligible);
+  save();
+  buildTree();
+  syncAnaSettings();
 }
 function setXset(ids) {
   SH.xset = [...ids];
@@ -975,8 +1045,8 @@ function syncControls() {
   $$("#segStyle button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === S.style)));
   $("#speed").value = String(S.speed);
   controls.autoRotate = !!S.autoRotate;
-  $("#favFirst").setAttribute("aria-pressed", String(!!(Q.on ? SH.xFirst : SH.favFirst)));
-  $("#favFirst").title = Q.on ? "Kijelöltek (X) előre" : "Csillagozottak előre";
+  $("#favFirst").setAttribute("aria-pressed", String(!!(Q.on ? SH.xFirst : A.on ? SH.oFirst : SH.favFirst)));
+  $("#favFirst").title = Q.on ? "Kijelöltek (X) előre" : A.on ? "Bekarikázottak előre" : "Csillagozottak előre";
   $("#holoOn").checked = !!S.holo;
   $("#holoQ").setAttribute("aria-pressed", String(!!S.holo));
   $("#holoOpacity").value = String(S.holoOpacity);
@@ -999,7 +1069,7 @@ function buildHoloParts() {
   }
 }
 function setView(v) {
-  if (Q.on) return; // a tippelőben a nézetet a tippelő beállításai rögzítik
+  if (Q.on || A.on) return; // a tippelőben és az analizálóban a nézetet a saját beállításuk rögzíti
   if (v === "paper" && !models.mP) return;
   if (S.view === v) return;
   S.view = v;
@@ -1096,14 +1166,18 @@ function bindControls() {
     if (star) { toggleFav(star.dataset.star); return; }
     const xb = e.target.closest(".xbtn");
     if (xb) { toggleX(xb.dataset.x); return; }
+    const ob = e.target.closest(".obtn");
+    if (ob) { toggleO(ob.dataset.o); return; }
     const b = e.target.closest(".item");
     if (!b) return;
     if (Q.on) { toggleX(b.dataset.id); return; } // a tippelőben a lista a kérdések körét állítja
+    if (A.on) { toggleO(b.dataset.id); return; } // az analizálóban is
     select(b.dataset.id);
     closeDrawers();
   });
   $("#favFirst").addEventListener("click", () => {
     if (Q.on) SH.xFirst = !SH.xFirst;
+    else if (A.on) SH.oFirst = !SH.oFirst;
     else SH.favFirst = !SH.favFirst;
     save();
     syncControls();
@@ -1288,7 +1362,8 @@ function bindLayout() {
 }
 
 /** A tippelőben (ha úgy van beállítva) válasz előtt nincs animáció: csak a kész forma látszik. */
-const quizAnimLocked = () => Q.on && !Q.answered && SH.quiz.anim === false;
+// (az analizálóban csak a gyűrűs forma látszik, ott nincs animáció)
+const quizAnimLocked = () => (Q.on && !Q.answered && SH.quiz.anim === false) || A.on;
 function hasTimeline() {
   return !!model && model.kind !== "static" && !quizAnimLocked();
 }
@@ -1337,7 +1412,19 @@ const Q = {
   wrong: [], // a molekula jó, de ezek a részek nem
   ok: false,
 };
-const quizHidden = () => Q.on && !Q.answered;
+// ---- analizáló (állapot; a működése lejjebb) ----
+const A = {
+  on: false, id: null, last: null, done: false, view: "3d",
+  labels: new Map(), // atom → { el, num, prime, role }: a felhasználó feliratai
+  ans: {}, // a felső részen megadott adatok (pl. cfg, ring, an, name, formula; diszacharidnál u1.*, u2.*, bond, red)
+  truth: null, // a helyes válaszok: { atoms: [...], form: {...} }
+  res: null, // a kiértékelés eredménye
+};
+const currentMode = () => (Q.on ? "quiz" : A.on ? "ana" : "view");
+/** Az analizálóban kiértékelés előtt: a modell szürke, a helyes válaszok rejtve. */
+const anaMasked = () => A.on && !A.done;
+/** Válasz előtt rejtve marad minden, ami elárulná a megoldást (tippelő és analizáló). */
+const quizHidden = () => (Q.on && !Q.answered) || anaMasked();
 const hideName = (s) => (quizHidden() ? "?" : s);
 function shuffle(a) {
   for (let i = a.length - 1; i > 0; i--) {
@@ -1479,7 +1566,7 @@ function openQuizPop(id, btn, ask) {
   updateQuizPop();
   pop.hidden = false;
   positionQuizPop();
-  const first = $(".qpop-row:not([hidden]) button", pop);
+  const first = pop.querySelector(".qpop-row:not([hidden]) button");
   if (first) first.focus({ preventScroll: true });
 }
 function closeQuizPop() {
@@ -1563,11 +1650,18 @@ function layoutOptions() {
   box.style.setProperty("--rows", Math.min(maxRows, rows));
   positionQuizPop();
 }
-function renderQuiz() {
+/** A mód (nézegető / tippelő / analizáló) szerinti felület. */
+function applyModeUI() {
   $("#quiz").hidden = !Q.on;
-  $(".title-block").hidden = Q.on;
+  $("#ana").hidden = !A.on;
+  $(".title-block").hidden = Q.on || A.on;
   $(".app").classList.toggle("quiz-mode", Q.on);
-  $$("#segMode button").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.v === "quiz") === Q.on)));
+  $(".app").classList.toggle("ana-mode", A.on);
+  const cur = currentMode();
+  $$("#segMode button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === cur)));
+}
+function renderQuiz() {
+  applyModeUI();
   if (!Q.on) { closeQuizPop(); return; }
   const pool = quizPool();
   $("#qScore").textContent = `Helyes: ${SH.score.ok} / ${SH.score.total}`;
@@ -1575,7 +1669,7 @@ function renderQuiz() {
     ? `Még nincs legalább két X-szel kijelölt molekula, ezért az összes (${pool.ids.length}) molekulából kérdezek. A bal oldali listában X-szel szűkítheted.`
     : pool.all
       ? `Az összes (${pool.ids.length}) molekulából kérdezek, ${optionCount(pool)} lehetőséggel.`
-      : `A ${pool.ids.length} kijelölt (X) molekulából kérdezek, ${optionCount(pool)} lehetőséggel.`;
+      : `${azA(pool.ids.length, true)} ${pool.ids.length} kijelölt (X) molekulából kérdezek, ${optionCount(pool)} lehetőséggel.`;
   const keepPop = !$("#qPop").hidden && !Q.answered ? QP.id : null;
   $("#qOpts").innerHTML = "";
   if (Q.empty || pool.ids.length < 2) {
@@ -1636,12 +1730,640 @@ function renderQuiz() {
     $("#qNext").textContent = "Következő molekula";
   }
 }
+// ---- analizáló ---------------------------------------------------------------------------
+// Egy véletlen, gyűrűs formájú mono- vagy diszacharid szürkén. Minden atomot fel kell
+// iratozni (elem, sorszám, szerep), fent pedig megadni a formáját (D/L, gyűrű, α/β), a nevét és
+// az összegképletét; diszacharidnál mindkét egységet, a kötést és hogy redukáló-e.
+const ROLE_NAME = { none: "nincs", glyc: "glikozidos OH", ringO: "gyűrű-O", ficak: "ficak", kamu: "kamuficak", bridge: "kötés-O" };
+const ROLE_SHORT = { glyc: "glik. OH", ringO: "gyűrű-O", ficak: "ficak", kamu: "kamuficak", bridge: "kötés-O" };
+const plainFormula = (f) => f.replace(/[₀-₉]/g, (d) => String(SUBSCRIPT.indexOf(d)));
+const carbonCount = (f) => +((/C(\d+)/.exec(plainFormula(f)) || [0, 1])[1]);
+const COMBO_LISTS = {
+  name: () => [...DATA.monos, ...DATA.dis].map((r) => ({ value: r.id, label: r.name, search: norm(`${r.name} ${r.alt || ""} ${r.id}`) }))
+    .sort((a, b) => a.label.localeCompare(b.label, "hu")),
+  mono: () => DATA.monos.map((r) => ({ value: r.id, label: r.name, search: norm(`${r.name} ${r.alt || ""} ${r.id}`) }))
+    .sort((a, b) => a.label.localeCompare(b.label, "hu")),
+  formula: () => [...new Set([...DATA.monos, ...DATA.dis].map((r) => r.formula))]
+    .map((f) => ({ value: f, label: f, search: norm(`${f} ${plainFormula(f)}`) }))
+    .sort((a, b) => carbonCount(a.value) - carbonCount(b.value) || a.label.localeCompare(b.label)),
+  bond: () => [...new Set(DATA.dis.map((d) => d.link))]
+    .map((l) => ({ value: l, label: l, search: norm(l) }))
+    .sort((a, b) => a.label.replace(/[αβ]/g, "").localeCompare(b.label.replace(/[αβ]/g, "")) || a.label.localeCompare(b.label)),
+};
+const comboCache = {};
+const comboList = (name) => (comboCache[name] ??= COMBO_LISTS[name]());
+const comboLabel = (name, v) => (comboList(name).find((o) => o.value === v) || { label: v }).label;
+// a felső rész mezői
+const AF = {
+  cfg: { label: "Konfiguráció", seg: [["D", "D"], ["L", "L"]] },
+  ring: { label: "Gyűrű", seg: [["p", "6 tagú"], ["f", "5 tagú"]], short: [["p", "6"], ["f", "5"]] },
+  an: { label: "Anomer", seg: [["a", "α"], ["b", "β"]] },
+  red: { label: "Redukáló?", seg: [["y", "igen"], ["n", "nem"]] },
+  name: { label: "Név", combo: "name" },
+  formula: { label: "Összegképlet", combo: "formula" },
+  bond: { label: "Glikozidos kötés", combo: "bond" },
+  uname: { label: "Melyik monoszacharid", combo: "mono" },
+};
+function fieldDef(key) {
+  const [a, b] = key.split(".");
+  return b ? AF[b === "name" ? "uname" : b] : AF[a];
+}
+function anaRows() {
+  if (!st.di) return [["", ["cfg", "ring", "an"]], ["", ["name", "formula"]]];
+  return [
+    ["1. egység", ["u1.name", "u1.cfg", "u1.ring", "u1.an"]],
+    ["2. egység (′)", ["u2.name", "u2.cfg", "u2.ring", "u2.an"]],
+    ["", [...(SH.ana.askBond !== false ? ["bond"] : []), "red"]],
+    ["", ["name", "formula"]],
+  ];
+}
+const anaKeys = () => anaRows().flatMap((r) => r[1]);
+
+/** Egy atom az analizálóban: feliratozandó ("need"), megadott ("given") vagy rejtett ("hidden"). */
+function anaState(i) {
+  const m = model;
+  if (!m || i >= m.N) return "hidden";
+  const mode = (x) => (x === "hidden" ? "hidden" : x === "given" ? "given" : "need");
+  if (m.ohSet.has(i) && SH.ana.oh !== "label") return mode(SH.ana.oh);
+  if (m.el[i] === "H") return mode(SH.ana.h);
+  return "need";
+}
+/** A megjelenítendő felirat: a megadott atomnál a helyes, különben a felhasználóé. */
+function anaLabelOf(i) {
+  const T = A.truth && A.truth.atoms[i];
+  if (!T) return null;
+  const s = anaState(i);
+  if (s === "given") return T;
+  return s === "need" ? A.labels.get(i) || null : null;
+}
+const labelEq = (u, t) => u.el === t.el && u.num === t.num && (t.num === 0 || !st.di || u.prime === t.prime) && u.role === t.role;
+const fmtAtom = (L) => `${L.el}${L.num ? `${L.num}${st.di && L.prime ? "′" : ""}` : ""}`;
+const fmtAtomRole = (L) => `${fmtAtom(L)}${L.role && L.role !== "none" ? ` · ${ROLE_SHORT[L.role]}` : ""}`;
+
+function anaPool() {
+  const all = ALL_IDS.filter(anaEligible);
+  if (SH.ana.source === "all") return { ids: all, all: true };
+  const ids = (SH.oset || []).filter(anaEligible);
+  if (!ids.length) return { ids: all, all: true, fallback: true };
+  return { ids, all: false };
+}
+function parseUnits(name) {
+  return name.split(/-\(\d[→↔]\d\)-/).map((x) => ({
+    cfg: (/-([DL])-/.exec(x) || [0, "D"])[1],
+    ring: /furan/.test(x) ? "f" : "p",
+    an: (/[αβ]/.exec(x) || ["α"])[0] === "α" ? "a" : "b",
+  }));
+}
+/** A helyes válaszok a betöltött molekulából: atomonként elem, sorszám (′) és szerep; a forma és a nevek. */
+function anaTruth() {
+  const m = models.m3, r = st.rec, t = 1;
+  const nb = Array.from({ length: m.N }, () => []);
+  for (const b of m.bonds) if (b.alpha(t) > 0.5) { nb[b.i].push(b.j); nb[b.j].push(b.i); }
+  // a sorszám a szénatomé: az O és a H a hozzá tartozó szénatom számát kapja
+  const parse = (lab) => { const mm = /(\d+)/.exec(lab || ""); return { num: mm ? +mm[1] : 0, prime: /′/.test(lab || "") }; };
+  const atoms = [];
+  for (let i = 0; i < m.N; i++) {
+    if (m.atomAlpha(t, i) < 0.5) continue; // (a kilépő víz atomjai)
+    const el = m.el[i];
+    let p;
+    if (el === "H") {
+      const j = nb[i].find((x) => m.el[x] !== "H");
+      p = j === undefined ? { num: 0, prime: false } : parse(m.lab[j]);
+    } else p = parse(m.lab[i]);
+    atoms[i] = { el, num: p.num, prime: p.prime, role: m.groupOf[i] || "none" };
+  }
+  const v = r.v.find((x) => x.key === st.vkey);
+  const form = {};
+  if (!st.di) Object.assign(form, { cfg: st.cfg, ring: v.ring, an: v.an });
+  else {
+    const [u1, u2] = parseUnits(v.name);
+    Object.assign(form, {
+      "u1.name": r.A, "u1.cfg": u1.cfg, "u1.ring": u1.ring, "u1.an": u1.an,
+      "u2.name": r.B, "u2.cfg": u2.cfg, "u2.ring": u2.ring, "u2.an": u2.an,
+      bond: r.link, red: r.reducing ? "y" : "n",
+    });
+  }
+  form.name = r.id;
+  form.formula = r.formula;
+  A.truth = { atoms, form };
+}
+function anaNew() {
+  closeAnaPop();
+  closeCombo();
+  const pool = anaPool();
+  let cand = pool.ids.filter((id) => id !== A.last);
+  if (!cand.length) cand = pool.ids;
+  const id = cand[Math.floor(Math.random() * cand.length)];
+  const rec = recOf(id);
+  Object.assign(A, { id, last: id, done: false, labels: new Map(), ans: {}, truth: null, res: null });
+  A.view = SH.ana.view === "mix" ? (Math.random() < 0.5 ? "3d" : "paper") : SH.ana.view;
+  const v = rec.v[Math.floor(Math.random() * rec.v.length)];
+  const cfg = MONO.has(id) && rec.cfg ? (Math.random() < 0.5 ? "D" : "L") : undefined;
+  load(id, { vkey: v.key, cfg });
+  anaTruth();
+  refreshAnaLabels();
+  renderAna();
+  updateStaticUI();
+  changed();
+}
+
+// ---- a feliratok a 3D-térben ----
+function refreshAnaLabels() {
+  if (!A.on) return;
+  const T = A.truth;
+  for (const L of labelEls) {
+    if (!L.ana) continue;
+    const i = L.i, t = T && T.atoms[i], s = t ? anaState(i) : "hidden";
+    let text = "", cls = "lbl ana";
+    if (t && s !== "hidden") {
+      if (s === "given") { text = fmtAtomRole(t); cls += " given"; }
+      else if (A.done) {
+        // jó: zöld; rossz: „a te feliratod → helyes”; kimaradt: csak a helyes, pirosan
+        const u = A.labels.get(i), ok = !!u && labelEq(u, t);
+        text = ok || !u ? fmtAtomRole(t) : `${fmtAtomRole(u)} → ${fmtAtomRole(t)}`;
+        cls += ok ? " ok" : " bad";
+      } else {
+        const u = A.labels.get(i);
+        if (u) text = fmtAtomRole(u);
+      }
+    }
+    L.el.className = cls;
+    L.el.textContent = text;
+    L.has = !!text;
+  }
+}
+function anaTip(i) {
+  const s = anaState(i), L = anaLabelOf(i);
+  if (s === "given" && L) return `<b>${fmtAtomRole(L)}</b> · megadva`;
+  if (L) return `<b>${fmtAtomRole(L)}</b> · a te feliratod (kattints a módosításhoz)`;
+  return "Kattints rá a feliratozáshoz";
+}
+
+// ---- a felső rész: forma, nevek, összegképlet ----
+const CHEV_DOWN = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`;
+function anaFieldEl(key, compact) {
+  const d = fieldDef(key), f = document.createElement("div");
+  f.className = "ana-field";
+  f.dataset.key = key;
+  const lab = document.createElement("span");
+  lab.className = "lab";
+  lab.textContent = d.label;
+  f.appendChild(lab);
+  if (d.seg) {
+    const g = document.createElement("div");
+    g.className = "seg mini-seg";
+    g.setAttribute("role", "group");
+    g.setAttribute("aria-label", d.label);
+    const opts = compact && d.short ? d.short : d.seg;
+    opts.forEach(([v, t], k) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.dataset.v = v;
+      b.textContent = t;
+      if (opts !== d.seg) b.title = d.seg[k][1];
+      g.appendChild(b);
+    });
+    f.appendChild(g);
+  } else {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "combo-btn";
+    b.dataset.key = key;
+    b.setAttribute("aria-haspopup", "listbox");
+    b.setAttribute("aria-label", d.label);
+    b.innerHTML = `<span class="v"></span>${CHEV_DOWN}`;
+    f.appendChild(b);
+  }
+  const tr = document.createElement("span");
+  tr.className = "truth";
+  f.appendChild(tr);
+  return f;
+}
+function renderAna() {
+  applyModeUI();
+  if (!A.on) { closeAnaPop(); closeCombo(); return; }
+  const sc = SH.anaScore;
+  $("#aScore").textContent = `Hibátlan: ${sc.ok} / ${sc.total}${sc.max ? ` · átlag ${Math.round((100 * sc.pts) / sc.max)}%` : ""}`;
+  const pool = anaPool();
+  $("#aPool").textContent = pool.fallback
+    ? `Még nincs bekarikázott molekula, ezért az összes (${pool.ids.length}) gyűrűs mono- és diszacharidból választok. A bal oldali listában karikával szűkítheted.`
+    : pool.all
+      ? `Az összes (${pool.ids.length}) gyűrűs mono- és diszacharidból választok.`
+      : `${azA(pool.ids.length, true)} ${pool.ids.length} bekarikázott molekulából választok.`;
+  const box = $("#aForm");
+  box.innerHTML = "";
+  if (!A.truth) return;
+  let rows = anaRows();
+  if (st.di) {
+    // a két egység kis táblázatban: fejléc + soronként egy egység (helytakarékos)
+    const tbl = document.createElement("div");
+    tbl.className = "ana-units";
+    for (const h of ["", "Monoszacharid", "Konfiguráció", "Gyűrű (tag)", "Anomer"]) {
+      const c = document.createElement("span");
+      c.className = "uh";
+      c.textContent = h;
+      tbl.appendChild(c);
+    }
+    for (const [title, keys] of rows.slice(0, 2)) {
+      const c = document.createElement("span");
+      c.className = "rlab";
+      c.textContent = title;
+      tbl.appendChild(c);
+      for (const key of keys) {
+        const f = anaFieldEl(key, true);
+        f.classList.add("cell");
+        tbl.appendChild(f);
+      }
+    }
+    box.appendChild(tbl);
+    rows = rows.slice(2);
+  }
+  for (const [title, keys] of rows) {
+    const row = document.createElement("div");
+    row.className = "ana-row";
+    if (title) {
+      const h = document.createElement("span");
+      h.className = "rlab";
+      h.textContent = title;
+      row.appendChild(h);
+    }
+    for (const key of keys) row.appendChild(anaFieldEl(key));
+    box.appendChild(row);
+  }
+  updateAnaForm();
+}
+function updateAnaForm() {
+  if (!A.on) return;
+  const T = A.truth ? A.truth.form : {};
+  for (const f of $$("#aForm .ana-field")) {
+    const key = f.dataset.key, d = fieldDef(key), val = A.ans[key], tv = T[key];
+    if (d.seg) {
+      for (const b of $$("button", f)) {
+        b.setAttribute("aria-pressed", String(b.dataset.v === val));
+        b.classList.toggle("dev-ok", !!SH.dev && !A.done && b.dataset.v === tv);
+        b.classList.toggle("ok", A.done && b.dataset.v === tv);
+        b.classList.toggle("bad", A.done && b.dataset.v === val && val !== tv);
+        b.disabled = A.done;
+      }
+    } else {
+      const b = f.querySelector(".combo-btn");
+      b.querySelector(".v").textContent = val ? comboLabel(d.combo, val) : "Válassz…";
+      b.classList.toggle("empty", !val);
+      b.disabled = A.done;
+    }
+    f.classList.toggle("ok", A.done && val === tv);
+    f.classList.toggle("bad", A.done && val !== tv);
+    const truthText = d.seg ? (d.seg.find((x) => x[0] === tv) || [0, tv])[1] : comboLabel(d.combo, tv);
+    f.querySelector(".truth").textContent = A.done && val !== tv ? `helyes: ${truthText}` : "";
+  }
+  updateAnaProgress();
+}
+function anaCounts() {
+  const T = A.truth;
+  let need = 0, done = 0;
+  if (T) {
+    for (let i = 0; i < T.atoms.length; i++) {
+      if (!T.atoms[i] || anaState(i) !== "need") continue;
+      need++;
+      if (A.labels.has(i)) done++;
+    }
+  }
+  const keys = anaKeys();
+  return { need, done, keys: keys.length, filled: keys.filter((k) => A.ans[k] !== undefined).length };
+}
+function updateAnaProgress() {
+  if (!A.on) return;
+  const msg = $("#aMsg");
+  const c0 = anaCounts(), open = !$("#ana").classList.contains("collapsed");
+  $("#aToggle").textContent = `${open ? "Adatok elrejtése" : "Adatok megadása"} (${c0.filled}/${c0.keys})`;
+  if (!A.done) {
+    const c = c0;
+    msg.innerHTML = `Feliratozva: <b>${c.done}/${c.need}</b> atom · kitöltve: <b>${c.filled}/${c.keys}</b> adat. Kattints egy atomra a feliratozáshoz!`;
+    $("#aCheck").hidden = false;
+    $("#aFill").hidden = !SH.dev;
+    $("#aNext").textContent = "Másikat kérek";
+    return;
+  }
+  const R = A.res, pts = R.aOk + R.fOk, max = R.aTot + R.fTot;
+  const head = pts === max ? "Hibátlan!" : `Eredmény: ${pts}/${max} pont (${Math.round((100 * pts) / max)}%).`;
+  msg.innerHTML = `<b>${head}</b> Atomok: ${R.aOk}/${R.aTot} · adatok: ${R.fOk}/${R.fTot}. A molekula: <b></b> · <span></span>`;
+  msg.querySelector("b:last-of-type").textContent = st.rec.name;
+  msg.querySelector("span").textContent = stateName();
+  $("#aCheck").hidden = true;
+  $("#aFill").hidden = true;
+  $("#aNext").textContent = "Következő molekula";
+}
+/** Fejlesztői mód: minden feliratot és adatot kitölt a helyes válasszal (ellenőrzéshez). */
+function anaFill() {
+  if (!A.on || A.done || !A.truth || !SH.dev) return;
+  const T = A.truth;
+  T.atoms.forEach((t, i) => { if (t && anaState(i) === "need") A.labels.set(i, { ...t }); });
+  for (const k of anaKeys()) A.ans[k] = T.form[k];
+  refreshAnaLabels();
+  updateAnaForm();
+  changed();
+}
+/** Telefonon az adatok összecsukhatók (a gomb szövegén látszik, hány van kitöltve). */
+function setAnaCollapsed(on) {
+  $("#ana").classList.toggle("collapsed", on);
+  $("#aToggle").setAttribute("aria-expanded", String(!on));
+  updateAnaProgress();
+}
+function anaEvaluate() {
+  if (!A.on || A.done || !A.truth) return;
+  setAnaCollapsed(false); // az eredmény mezőnként is látsszon
+  closeAnaPop();
+  closeCombo();
+  const T = A.truth;
+  let aOk = 0, aTot = 0;
+  for (let i = 0; i < T.atoms.length; i++) {
+    const t = T.atoms[i];
+    if (!t || anaState(i) !== "need") continue;
+    aTot++;
+    const u = A.labels.get(i);
+    if (u && labelEq(u, t)) aOk++;
+  }
+  const keys = anaKeys();
+  const fOk = keys.filter((k) => A.ans[k] === T.form[k]).length;
+  A.res = { aOk, aTot, fOk, fTot: keys.length };
+  A.done = true;
+  const sc = SH.anaScore, pts = aOk + fOk, max = aTot + keys.length;
+  sc.total++;
+  if (pts === max) sc.ok++;
+  sc.pts += pts;
+  sc.max += max;
+  save();
+  renderAna();
+  refreshAnaLabels();
+  updateStaticUI();
+  changed();
+}
+
+// ---- atom feliratozása (felugró menü) ----
+const AP = { i: null, pick: {}, fresh: true, x: 0, y: 0 };
+const AP_NAMES = { el: "elem", num: "sorszám", prime: "egység", role: "szerep" };
+function anaPopNeeds() {
+  const k = ["el", "num", "role"];
+  if (st.di && AP.pick.num !== "0") k.push("prime");
+  return k;
+}
+function openAnaPop(i, x, y) {
+  const u = A.labels.get(i);
+  AP.i = i;
+  AP.fresh = !u;
+  AP.x = x;
+  AP.y = y;
+  AP.pick = u ? { el: u.el, num: String(u.num), prime: u.prime ? "1" : "0", role: u.role } : {};
+  $("#apTitle").textContent = u ? "Felirat módosítása" : "Melyik atom ez?";
+  $('#aPop button[data-v="bridge"]').hidden = !st.di;
+  $("#aPop").hidden = false;
+  updateAnaPop();
+  positionAnaPop();
+  const first = $("#aPop .qpop-row:not([hidden]) button");
+  if (first) first.focus({ preventScroll: true });
+}
+function closeAnaPop() {
+  const pop = $("#aPop");
+  if (pop) pop.hidden = true;
+  AP.i = null;
+}
+function updateAnaPop() {
+  const T = A.truth && A.truth.atoms[AP.i];
+  for (const row of $$("#aPop .qpop-row")) {
+    const k = row.dataset.k;
+    row.hidden = k === "prime" && (!st.di || AP.pick.num === "0");
+    const tv = !T ? null : k === "num" ? String(T.num) : k === "prime" ? (T.prime ? "1" : "0") : T[k];
+    for (const b of $$("button", row)) {
+      b.setAttribute("aria-pressed", String(AP.pick[k] === b.dataset.v));
+      b.classList.toggle("dev-ok", !!SH.dev && b.dataset.v === tv); // fejlesztői mód: a jó választás
+    }
+  }
+  const missing = anaPopNeeds().filter((k) => AP.pick[k] === undefined);
+  $("#apOk").disabled = missing.length > 0;
+  $("#apClear").hidden = AP.fresh;
+  const el = $("#apPreview");
+  if (missing.length) el.textContent = `Add meg: ${missing.map((k) => AP_NAMES[k]).join(", ")}.`;
+  else {
+    el.innerHTML = "Felirat: <b></b>";
+    el.querySelector("b").textContent = fmtAtomRole({ el: AP.pick.el, num: +AP.pick.num, prime: AP.pick.prime === "1", role: AP.pick.role });
+  }
+}
+function applyAnaPop() {
+  if (AP.i === null || anaPopNeeds().some((k) => AP.pick[k] === undefined)) return;
+  const p = AP.pick;
+  A.labels.set(AP.i, { el: p.el, num: +p.num, prime: st.di && p.num !== "0" && p.prime === "1", role: p.role });
+  closeAnaPop();
+  refreshAnaLabels();
+  updateAnaProgress();
+  changed();
+}
+function positionAnaPop() {
+  const pop = $("#aPop");
+  if (pop.hidden) return;
+  const pw = pop.offsetWidth, ph = pop.offsetHeight;
+  const x = Math.max(8, Math.min(window.innerWidth - pw - 8, AP.x + 14));
+  let y = AP.y + 14;
+  if (y + ph > window.innerHeight - 8) y = Math.max(8, AP.y - ph - 14);
+  pop.style.left = `${Math.round(x)}px`;
+  pop.style.top = `${Math.round(y)}px`;
+}
+function bindAnaPop() {
+  const pop = $("#aPop");
+  pop.addEventListener("click", (e) => {
+    const b = e.target.closest(".qpop-row button");
+    if (!b) return;
+    AP.pick[b.closest(".qpop-row").dataset.k] = b.dataset.v;
+    // új feliratnál, ha minden megvan, azonnal elmenti (gyorsabb feliratozás)
+    if (AP.fresh && !anaPopNeeds().some((k) => AP.pick[k] === undefined)) applyAnaPop();
+    else updateAnaPop();
+  });
+  $("#apOk").addEventListener("click", applyAnaPop);
+  $("#apClose").addEventListener("click", closeAnaPop);
+  $("#apClear").addEventListener("click", () => {
+    A.labels.delete(AP.i);
+    closeAnaPop();
+    refreshAnaLabels();
+    updateAnaProgress();
+    changed();
+  });
+  pop.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeAnaPop(); }
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (!pop.hidden && !pop.contains(e.target) && e.target !== canvas) closeAnaPop();
+  });
+  window.addEventListener("resize", positionAnaPop);
+}
+
+// ---- kereshető lenyíló lista ----
+const CB = { key: null, btn: null, items: [], active: 0 };
+function openCombo(key, btn) {
+  CB.key = key;
+  CB.btn = btn;
+  CB.name = fieldDef(key).combo;
+  CB.active = 0;
+  const pop = $("#comboPop");
+  $("#comboSearch").value = "";
+  pop.hidden = false;
+  btn.setAttribute("aria-expanded", "true");
+  renderComboList();
+  positionCombo();
+  // érintőképernyőn nem nyitjuk fel azonnal a billentyűzetet
+  if (!window.matchMedia("(pointer: coarse)").matches) $("#comboSearch").focus({ preventScroll: true });
+}
+function closeCombo() {
+  const pop = $("#comboPop");
+  if (!pop || pop.hidden) return;
+  pop.hidden = true;
+  if (CB.btn) CB.btn.setAttribute("aria-expanded", "false");
+  CB.btn = null;
+}
+function renderComboList() {
+  const q = norm($("#comboSearch").value.trim());
+  CB.items = comboList(CB.name).filter((o) => !q || o.search.includes(q));
+  CB.active = Math.max(0, Math.min(CB.active, CB.items.length - 1));
+  const tv = A.truth && A.truth.form[CB.key], val = A.ans[CB.key];
+  const ul = $("#comboList");
+  ul.innerHTML = "";
+  CB.items.forEach((o, k) => {
+    const li = document.createElement("li");
+    li.setAttribute("role", "option");
+    li.dataset.v = o.value;
+    li.id = `combo-opt-${k}`;
+    li.textContent = o.label;
+    li.setAttribute("aria-selected", String(o.value === val));
+    li.classList.toggle("active", k === CB.active);
+    li.classList.toggle("dev-ok", !!SH.dev && o.value === tv); // fejlesztői mód: a jó válasz
+    ul.appendChild(li);
+  });
+  if (!CB.items.length) {
+    const li = document.createElement("li");
+    li.className = "none";
+    li.textContent = "Nincs találat.";
+    ul.appendChild(li);
+  }
+  $("#comboSearch").setAttribute("aria-activedescendant", CB.items.length ? `combo-opt-${CB.active}` : "");
+}
+function chooseCombo(v) {
+  if (!CB.key) return;
+  A.ans[CB.key] = v;
+  const btn = CB.btn;
+  closeCombo();
+  updateAnaForm();
+  if (btn) btn.focus({ preventScroll: true });
+}
+function positionCombo() {
+  const pop = $("#comboPop"), b = CB.btn;
+  if (pop.hidden || !b) return;
+  const r = b.getBoundingClientRect();
+  const w = Math.min(window.innerWidth - 16, Math.max(r.width, 260));
+  pop.style.width = `${Math.round(w)}px`;
+  const ph = pop.offsetHeight;
+  const x = Math.max(8, Math.min(window.innerWidth - w - 8, r.left));
+  let y = r.bottom + 4;
+  if (y + ph > window.innerHeight - 8) y = Math.max(8, r.top - ph - 4);
+  pop.style.left = `${Math.round(x)}px`;
+  pop.style.top = `${Math.round(y)}px`;
+}
+function bindCombo() {
+  const pop = $("#comboPop"), input = $("#comboSearch");
+  input.addEventListener("input", () => { CB.active = 0; renderComboList(); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!CB.items.length) return;
+      CB.active = (CB.active + (e.key === "ArrowDown" ? 1 : -1) + CB.items.length) % CB.items.length;
+      renderComboList();
+      const a = $("#comboList li.active");
+      if (a) a.scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (CB.items[CB.active]) chooseCombo(CB.items[CB.active].value);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      const btn = CB.btn;
+      closeCombo();
+      if (btn) btn.focus({ preventScroll: true });
+    }
+  });
+  $("#comboList").addEventListener("click", (e) => {
+    const li = e.target.closest("li[data-v]");
+    if (li) chooseCombo(li.dataset.v);
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest(".combo-btn")) closeCombo();
+  });
+  window.addEventListener("resize", positionCombo);
+  $(".stage").addEventListener("scroll", () => { positionCombo(); positionAnaPop(); }, { passive: true });
+}
+
+// ---- az analizáló beállításai és gombjai ----
+function syncAnaSettings() {
+  const c = SH.ana;
+  $$("#asView button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === c.view)));
+  $$("#asSource button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === c.source)));
+  $$("#asH button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === c.h)));
+  $$("#asOH button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === c.oh)));
+  $("#asSourceO").textContent = `Bekarikázottak (${(SH.oset || []).filter(anaEligible).length})`;
+  $("#asSourceAll").textContent = `Összes (${ALL_IDS.filter(anaEligible).length})`;
+  $("#asBond").checked = c.askBond !== false;
+}
+function bindAna() {
+  const seg = (id, key, after) => {
+    $(id).addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      SH.ana[key] = b.dataset.v;
+      save();
+      syncAnaSettings();
+      if (after) after();
+    });
+  };
+  seg("#asView", "view");
+  seg("#asSource", "source", () => { if (A.on && !A.done && !anaPool().ids.includes(A.id)) anaNew(); else renderAna(); });
+  const relabel = () => { if (A.on) { refreshAnaLabels(); updateAnaProgress(); changed(); } };
+  seg("#asH", "h", relabel);
+  seg("#asOH", "oh", relabel);
+  $("#asBond").addEventListener("change", (e) => {
+    SH.ana.askBond = e.target.checked;
+    save();
+    if (A.on && !A.done) { delete A.ans.bond; renderAna(); }
+  });
+  $("#asFromFav").addEventListener("click", () => setOset(SH.fav));
+  $("#asClearO").addEventListener("click", () => setOset([]));
+  $("#aNext").addEventListener("click", anaNew);
+  $("#aCheck").addEventListener("click", anaEvaluate);
+  $("#aFill").addEventListener("click", anaFill);
+  $("#aToggle").addEventListener("click", () => setAnaCollapsed(!$("#ana").classList.contains("collapsed")));
+  $("#aForm").addEventListener("click", (e) => {
+    if (A.done) return;
+    const cb = e.target.closest(".combo-btn");
+    if (cb) {
+      if (CB.btn === cb) closeCombo();
+      else openCombo(cb.dataset.key, cb);
+      return;
+    }
+    const b = e.target.closest(".seg button");
+    if (!b) return;
+    const key = b.closest(".ana-field").dataset.key;
+    A.ans[key] = b.dataset.v;
+    updateAnaForm();
+  });
+  bindAnaPop();
+  bindCombo();
+  syncAnaSettings();
+}
+
 function setMode(mode) {
-  const on = mode === "quiz";
-  if (on === Q.on) return;
+  if (!["view", "quiz", "ana"].includes(mode) || mode === currentMode()) return;
   if (DBG.running) stopDebug(); // a hibakereső a nézegetőben fut
-  Q.on = on;
-  if (on) {
+  closeQuizPop();
+  closeAnaPop();
+  closeCombo();
+  Q.on = mode === "quiz";
+  A.on = mode === "ana";
+  if (Q.on) {
     // a tippelő először a nézegető beállításait és csillagait veszi át
     if (!SQ) SQ = clone(SV);
     if (!SH.xset) SH.xset = [...SH.fav];
@@ -1649,18 +2371,27 @@ function setMode(mode) {
   } else {
     S = SV;
   }
+  // az analizáló a csillagozottakat veszi át (az X-eket nem)
+  if (A.on && !SH.oset) SH.oset = SH.fav.filter(anaEligible);
   save();
   refreshHl();
   refreshElColors();
   syncControls();
   syncQuizSettings();
+  syncAnaSettings();
   buildTree();
-  if (on) {
+  if (Q.on) {
+    renderAna();
     quizNew();
     try { history.replaceState(null, "", "#tippelo"); } catch { /* beágyazott nézet */ }
+  } else if (A.on) {
+    renderQuiz();
+    anaNew();
+    try { history.replaceState(null, "", "#analizalo"); } catch { /* beágyazott nézet */ }
   } else {
     try { history.replaceState(null, "", `#${st.rec.id}`); } catch { /* beágyazott nézet */ }
     renderQuiz();
+    renderAna();
     pickModels();
     fitCamera();
     markCurrent();
@@ -1750,7 +2481,7 @@ function bindQuizSettings() {
 }
 
 function pickModels() {
-  const paper = (Q.on ? Q.view : S.view) === "paper" && models.mP;
+  const paper = (Q.on ? Q.view : A.on ? A.view : S.view) === "paper" && models.mP;
   model = paper ? models.mP : models.m3;
   holoModel = undefined; // a hologram első bekapcsolásakor készül el
   P = null;
@@ -1770,6 +2501,16 @@ function rebuild(refit) {
 let dirty = true;
 function changed() { dirty = true; }
 
+/** Redukáló-e a molekula (a nézegető címkéjéhez), rövid magyarázattal. */
+function reducingInfo(r) {
+  if (MONO.has(r.id)) return { text: "redukáló", tip: "Minden monoszacharid redukáló: nyílt láncú formájában szabad aldehid- vagy ketocsoportja van (pl. pozitív Fehling- és ezüsttükörpróba)." };
+  if (DI.has(r.id)) {
+    return r.reducing
+      ? { text: "redukáló", tip: "Redukáló: a második egység glikozidos OH-ja szabad, ezért gyűrűje felnyílhat." }
+      : { text: "nem redukáló", tip: "Nem redukáló: mindkét glikozidos OH a kötésben van, egyik gyűrű sem nyílhat fel." };
+  }
+  return { text: "nem redukáló", tip: "Gyakorlatilag nem redukáló: a hosszú láncnak csak egyetlen redukáló vége van (pl. negatív Fehling-próba)." };
+}
 function fmtMass(m) { return `${m.toFixed(2).replace(".", ",")} g/mol`; }
 
 /** A glikozidos kötés leírása: α/β és a kapcsolódó szénatomok. */
@@ -1799,7 +2540,7 @@ function updateStaticUI() {
   } else if (!st.di) {
     $("#eyebrow").textContent = `Monoszacharid · ${CLS1[r.n]} · ${SUB1[r.sub]}`;
   } else {
-    $("#eyebrow").textContent = `Diszacharid · ${unitName(r.A)} + ${unitName(r.B)} · ${r.reducing ? "redukáló" : "nem redukáló"}`;
+    $("#eyebrow").textContent = `Diszacharid · ${unitName(r.A)} + ${unitName(r.B)}`;
   }
   // forma-választók
   const cfgBtns = $$("#segCfg button");
@@ -1854,7 +2595,7 @@ function updateStaticUI() {
   // nézet és hologram
   const hasPaper = models.paperOk;
   $$("#segView button, #segViewQ button").forEach((b) => {
-    b.disabled = Q.on || (b.dataset.v === "paper" && !hasPaper);
+    b.disabled = Q.on || A.on || (b.dataset.v === "paper" && !hasPaper);
     b.setAttribute("aria-pressed", String(b.dataset.v === (model.paper ? "paper" : "3d")));
   });
   $("#holoHint").textContent = model.paper
@@ -1902,6 +2643,9 @@ function polyCaption() {
  */
 function quizCaption() {
   const t = st.t, m = model;
+  if (A.on) {
+    return "<b>Elemezd a molekulát!</b> Kattints egy atomra, és add meg, melyik atom (elem, sorszám) és mi a szerepe; fent add meg a formáját, a nevét és az összegképletét. A végén: Kiértékelés.";
+  }
   const lock = quizAnimLocked() ? " Az animáció a Tippelő beállításaiban ki van kapcsolva; a válasz után megnézheted." : "";
   if (st.poly) return t >= 0.999 ? `<b>Poliszacharid-részlet.</b> Melyik molekula ez?${lock}` : polyCaption();
   if (m.kind === "static") return `<b>${st.di ? "Diszacharid" : "Nyílt láncú forma"}.</b> Melyik molekula ez?`;
@@ -1998,6 +2742,8 @@ function updateDynamicUI() {
     setText($("#bondLine"), bi.long);
   }
   $("#bondLine").hidden = !st.di && !st.poly;
+  const red = reducingInfo(r);
+  chips.push(`<span class="chip red" title="${red.tip}">${red.text}</span>`);
   setHTML($("#chips"), chips.join(""));
   setHTML($("#caption"), caption());
   $("#scrub").value = String(Math.round(st.t * 1000));
@@ -2009,7 +2755,7 @@ function updateDynamicUI() {
   // jelmagyarázat
   const leg = [];
   for (const g of GROUPS) {
-    if (!model.present.has(g.key) || !S.hl[g.key] || !S.vis[g.key]) continue;
+    if (anaMasked() || !model.present.has(g.key) || !S.hl[g.key] || !S.vis[g.key]) continue;
     if (g.key === "glyc" && model.kind === "cond" && !model.v.g.glyc.length && st.t >= 0.98) continue;
     leg.push(`<span><i class="dot" style="background:${S.colors[g.key]}"></i>${g.name}</span>`);
   }
@@ -2046,8 +2792,35 @@ const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
 const tip = $("#tooltip");
 let pointerDown = false;
-canvas.addEventListener("pointerdown", () => { pointerDown = true; tip.hidden = true; });
+let downPt = null;
+canvas.addEventListener("pointerdown", (e) => { pointerDown = true; tip.hidden = true; downPt = { x: e.clientX, y: e.clientY, t: performance.now() }; });
 window.addEventListener("pointerup", () => { pointerDown = false; });
+/** Az adott képernyőpont alatti atom sorszáma (vagy null). */
+function atomAtPoint(x, y) {
+  const rect = canvas.getBoundingClientRect();
+  ndc.set(((x - rect.left) / rect.width) * 2 - 1, -((y - rect.top) / rect.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  return mainLayer.atomAt(ray);
+}
+// analizáló: egy atomra kattintva (húzás nélkül) feljön a feliratozó menü
+canvas.addEventListener("pointerup", (e) => {
+  const d = downPt;
+  downPt = null;
+  if (!A.on || !d) return;
+  if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6 || performance.now() - d.t > 700) return;
+  const i = atomAtPoint(e.clientX, e.clientY);
+  if (i === null) { closeAnaPop(); return; }
+  if (A.done) {
+    // kiértékelés után (érintőképernyőn is) megmutatja, mi az atom
+    const rect = canvas.getBoundingClientRect();
+    tip.innerHTML = atomInfo(i);
+    tip.hidden = false;
+    tip.style.left = `${Math.min(e.clientX - rect.left + 14, rect.width - tip.offsetWidth - 8)}px`;
+    tip.style.top = `${Math.min(e.clientY - rect.top + 14, rect.height - tip.offsetHeight - 8)}px`;
+    return;
+  }
+  if (anaState(i) === "need") openAnaPop(i, e.clientX, e.clientY);
+});
 canvas.addEventListener("pointerleave", () => { tip.hidden = true; });
 canvas.addEventListener("pointermove", (e) => {
   if (pointerDown || e.pointerType === "touch") return;
@@ -2056,7 +2829,7 @@ canvas.addEventListener("pointermove", (e) => {
   ray.setFromCamera(ndc, camera);
   const i = mainLayer.atomAt(ray);
   if (i === null) { tip.hidden = true; return; }
-  tip.innerHTML = atomInfo(i);
+  tip.innerHTML = anaMasked() ? anaTip(i) : atomInfo(i);
   tip.hidden = false;
   const x = e.clientX - rect.left + 14, y = e.clientY - rect.top + 14;
   tip.style.left = `${Math.min(x, rect.width - tip.offsetWidth - 8)}px`;
@@ -2203,7 +2976,9 @@ function bindModals() {
   });
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
-    if (!$("#qPop").hidden) { closeQuizPop(); e.preventDefault(); }
+    if (!$("#comboPop").hidden) { closeCombo(); e.preventDefault(); }
+    else if (!$("#aPop").hidden) { closeAnaPop(); e.preventDefault(); }
+    else if (!$("#qPop").hidden) { closeQuizPop(); e.preventDefault(); }
     else if (!$("#dbgBg").hidden) { hideModal("#dbgBg"); e.preventDefault(); }
     else if (!$("#codeBg").hidden) { hideModal("#codeBg"); e.preventDefault(); }
     else if (!$("#introBg").hidden) { closeIntro(); e.preventDefault(); }
@@ -2213,26 +2988,12 @@ function bindModals() {
 }
 
 // ---- fejlesztői mód: hibakereső (Debugger) ------------------------------------------------
-// A kijelölt csoportok minden molekuláján és formáján (D/L, gyűrű, anomer, idővonal) végigmegy,
-// és egyenként átkapcsolja, majd visszakapcsolja a beállításokat: 3D ↔ 2D, nyílt ↔ zárt,
-// hologram ki ↔ be. Két kapcsolás között a megadott ideig vár, hogy szemmel követhető legyen;
-// közben minden lépésnél magától is ellenőrzi a modellt.
-const DBG_SEQ = [ // minden lépés egyetlen beállítást vált; a végén vissza az elejére
-  { view: "3d", t: 1, holo: false },
-  { view: "3d", t: 0, holo: false },
-  { view: "3d", t: 0, holo: true },
-  { view: "3d", t: 1, holo: true },
-  { view: "paper", t: 1, holo: true },
-  { view: "paper", t: 0, holo: true },
-  { view: "paper", t: 0, holo: false },
-  { view: "paper", t: 1, holo: false },
-];
-const DBG_SEQ_OPEN = [ // gyűrűt nem képző monoszacharid: nincs idővonal
-  { view: "3d", t: 0, holo: false },
-  { view: "3d", t: 0, holo: true },
-  { view: "paper", t: 0, holo: true },
-  { view: "paper", t: 0, holo: false },
-];
+// A nézegetőben fut. A kijelölt csoportok molekuláin a lista sorrendjében megy végig. Minden
+// molekulát a kért nézetben (3D, 2D vagy mindkettőben) megjelenít, lejátssza az animációt, majd
+// a jobb oldali beállításokat fentről lefelé egyenként átállítja és visszaállítja; a színek
+// vannak a végén (mindegyik narancsra, majd vissza). Két lépés között a megadott ideig vár,
+// hogy szemmel is követhető legyen, és minden lépés után magától is ellenőrzi a modellt.
+const DBG_ORANGE = "#ff8a00";
 // a mért adatok alapján: ennél hosszabb kötés vagy közelebbi (nem kötött) nehézatomok hibának számítanak
 const DBG_LIMIT = { m3: { bond: 2.0, close: 1.2 }, paper: { bond: 3.2, close: 0.5 } };
 const DBG_GROUP_IDS = {
@@ -2240,75 +3001,190 @@ const DBG_GROUP_IDS = {
   di: () => DIS_SORTED.map((d) => d.id),
   poly: () => POLY_GROUPS.flatMap(([g]) => POLYS.filter((p) => p.group === g)).map((p) => p.id),
 };
-/** Egy molekula összes formája: monoszacharidnál D/L × gyűrű × anomer, diszacharidnál anomer × idővonal. */
-function debugForms(id) {
+const DBG_VIEWS = { "3d": ["3d"], paper: ["paper"], both: ["3d", "paper"] };
+const getPath = (o, key) => key.split(".").reduce((x, k) => x[k], o);
+
+/** Mi állítható egy molekulánál (az alapformája szerint): idővonalak, forma, kiemelt csoportok, elemek. */
+function dbgInfo(id) {
   const r = recOf(id), k = kindOf(id);
-  if (k === "poly") return [{ cfg: "D", vkey: null, tl: "poly" }];
-  if (k === "di") {
-    const tls = r.reducing ? ["closure", "cond"] : ["cond"];
-    return r.v.flatMap((v) => tls.map((tl) => ({ cfg: "D", vkey: v.key, tl })));
+  const I = { k, tls: [], cfg: null, ring: null, an: null, groups: [], els: ELS.filter((e) => r.el.includes(e)), rings: true };
+  const present = (g) => GROUPS.map((x) => x.key).filter((x) => (g[x] || []).length);
+  if (k === "poly") {
+    I.tls = ["poly"];
+    I.groups = present(r.g);
+  } else if (k === "di") {
+    const v = r.v.find((x) => x.key === r.defv) || r.v[0];
+    I.tls = r.reducing ? ["closure", "cond"] : ["cond"];
+    if (r.v.length > 1) I.an = v.key;
+    I.groups = present(v.g);
+  } else {
+    const v = r.v.find((x) => x.key === r.defv) || r.v[0];
+    if (r.cfg) I.cfg = r.cfg;
+    if (v) {
+      I.tls = ["closure"];
+      if (new Set(r.v.map((x) => x.ring)).size > 1) I.ring = v.ring;
+      I.an = v.an;
+      I.groups = present(v.g);
+    } else I.rings = false;
   }
-  const cfgs = r.cfg ? [r.cfg, r.cfg === "D" ? "L" : "D"] : ["D"];
-  const keys = r.v.length ? r.v.map((v) => v.key) : [null];
-  return cfgs.flatMap((cfg) => keys.map((vkey) => ({ cfg, vkey, tl: "closure" })));
+  return I;
 }
-function debugPlan(groups) {
+/**
+ * Egy molekula egy nézetben: a lépések listája. O az eredeti beállítások másolata
+ * (a visszaállítás értékei). „Lépésenként” módban minden átállítás után jön a
+ * visszaállítás; „egyszerre” módban a molekula végén egyetlen lépés állít vissza mindent.
+ */
+function dbgPass(id, view, opt, O) {
+  const I = dbgInfo(id), stepMode = opt.restore !== "end";
+  const steps = [];
+  const add = (o) => steps.push({ id, view, ...o });
+  // egy beállítás átállítása (és lépésenkénti módban a visszaállítása); a felirat az új, ill. az eredeti értéket mutatja
+  const set = (key, value, name, fmt = (v) => v) => {
+    const orig = getPath(O, key);
+    add({ type: "set", key, value, label: `${name}: ${fmt(value)}` });
+    if (stepMode) add({ type: "set", key, value: orig, label: `${name}: ${fmt(orig)} (vissza)` });
+  };
+  const form = (key, value, back, name, fmt) => {
+    add({ type: "form", key, value, label: `${name}: ${fmt(value)}` });
+    if (stepMode) add({ type: "form", key, value: back, label: `${name}: ${fmt(back)} (vissza)` });
+  };
+  const onOff = (on) => (on ? "be" : "ki");
+  const color = (c) => (c === DBG_ORANGE ? "narancs" : "eredeti");
+  add({ type: "load", label: "megjelenítés" });
+  // animáció (diszacharidnál a második idővonalon is)
+  if (I.tls.length) add({ type: "anim", tl: I.tls[0], label: "animáció" });
+  if (I.tls.length > 1) {
+    add({ type: "tl", value: I.tls[1], label: "Glikozidos kötés kialakulása fül" });
+    add({ type: "anim", tl: I.tls[1], label: "animáció (glikozidos kötés kialakulása)" });
+    if (stepMode) add({ type: "tl", value: I.tls[0], label: "Gyűrűzáródás fül (vissza)" });
+  }
+  if (I.tls.length) set("speed", O.speed === 2 ? 1 : 2, "Sebesség", (v) => `${String(v).replace(".", ",")}×`);
+  // Hologram (kihagyható): a részleteit bekapcsolt hologramon váltjuk
+  if (opt.holo) {
+    if (!O.holo) {
+      add({ type: "set", key: "holo", value: true, label: "Hologram: be" });
+    } else {
+      add({ type: "set", key: "holo", value: false, label: "Hologram: ki" });
+      add({ type: "set", key: "holo", value: true, label: "Hologram: be (vissza)" });
+    }
+    set("holoOpacity", O.holoOpacity < 45 ? 75 : 15, "Hologram átlátszósága");
+    for (const p of HOLO_PARTS) {
+      if ((p.key === "ficak" || p.key === "kamu") && !I.groups.includes(p.key)) continue;
+      set(`holoParts.${p.key}`, !O.holoParts[p.key], `Hologram – ${p.name}`, onOff);
+    }
+    if (!O.holo && stepMode) add({ type: "set", key: "holo", value: false, label: "Hologram: ki (vissza)" });
+  }
+  // Forma
+  if (I.cfg) form("cfg", I.cfg === "D" ? "L" : "D", I.cfg, "Konfiguráció", (v) => v);
+  if (I.ring) form("ring", I.ring === "p" ? "f" : "p", I.ring, "Gyűrű", (v) => ({ p: "piranóz", f: "furanóz" })[v]);
+  if (I.an) form("an", I.an === "a" ? "b" : "a", I.an, "Anomer", (v) => GREEK[v]);
+  // Kiemelések (a színek a legvégén jönnek)
+  for (const g of GROUPS) {
+    if (!I.groups.includes(g.key)) continue;
+    set(`hl.${g.key}`, !O.hl[g.key], `Kiemelés – ${g.name} színezése`, onOff);
+    set(`vis.${g.key}`, !O.vis[g.key], `Kiemelés – ${g.name}`, (v) => (v ? "látszik" : "elrejtve"));
+  }
+  set("hlOpen", !O.hlOpen, "Kiemelés a nyílt láncon is", onOff);
+  // Láthatóság
+  set("showH", !O.showH, "H-atomok", onOff);
+  set("showOH", !O.showOH, "Sima OH-csoportok", onOff);
+  set("labels", !O.labels, "C-atomok számozása", onOff);
+  if (I.rings) set("ringFill", !O.ringFill, "Gyűrű síkjának jelölése", onOff);
+  // Megjelenítés
+  const STYLE_NAME = { bs: "golyó–pálcika", st: "pálcika", sf: "kalotta" };
+  for (const s of ["bs", "st", "sf"]) if (s !== O.style) set("style", s, "Modell", (v) => STYLE_NAME[v]);
+  set("autoRotate", !O.autoRotate, "Automatikus forgatás", onOff);
+  // Színek: mindegyik narancsra, majd vissza
+  for (const g of GROUPS) if (I.groups.includes(g.key)) set(`colors.${g.key}`, DBG_ORANGE, `Szín – ${g.name}`, color);
+  for (const e of I.els) set(`el.${e}`, DBG_ORANGE, `Atomszín – ${e}`, color);
+  if (!stepMode) add({ type: "restoreAll", label: "minden beállítás visszaállítása" });
+  return steps;
+}
+function debugPlan(opt, O = SV) {
   const steps = [];
   for (const g of ["mono", "di", "poly"]) {
-    if (!groups[g]) continue;
+    if (!opt.groups[g]) continue;
     for (const id of DBG_GROUP_IDS[g]()) {
-      for (const f of debugForms(id)) {
-        const seq = kindOf(id) === "mono" && !f.vkey ? DBG_SEQ_OPEN : DBG_SEQ;
-        seq.forEach((s, k) => steps.push({ id, ...f, ...s, play: k > 0 && seq[k - 1].t === 0 && s.t === 1 }));
-      }
+      for (const view of DBG_VIEWS[opt.views] || DBG_VIEWS.both) steps.push(...dbgPass(id, view, opt, O));
     }
   }
   return steps;
 }
-const DBG_DUR = (s) => DURATION[s.tl === "poly" ? "poly" : s.tl === "cond" ? "cond" : s.view === "paper" ? "paper" : "closure"];
+const DBG_ANIM_SEC = (s, tl) => DURATION[tl === "poly" ? "poly" : tl === "cond" ? "cond" : s.view === "paper" ? "paper" : "closure"];
 function fmtDuration(sec) {
   if (sec < 90) return `${Math.round(sec)} másodperc`;
   const min = Math.round(sec / 60);
   return min < 90 ? `${min} perc` : `${Math.floor(min / 60)} óra ${min % 60} perc`;
 }
 function stepLabel(s) {
-  const r = recOf(s.id), k = kindOf(s.id);
-  const v = r.v ? r.v.find((x) => x.key === s.vkey) : null;
-  let form = "", ends = ["nyílt", "zárt"];
-  if (k === "mono") form = v ? v.name.replace("{cfg}", s.cfg) : openName(r, s.cfg);
-  if (k === "di") form = s.tl === "cond" ? `${v.common} · kötés kialakulása` : `${v.common} · gyűrűzáródás`;
-  if (s.tl === "cond") ends = ["két monoszacharid", "diszacharid"];
-  if (s.tl === "poly") ends = ["első egység", "kész lánc"];
-  const tl = k === "mono" && !v ? "" : ` · ${ends[s.t >= 1 ? 1 : 0]}`;
-  return `${r.name}${form ? ` · ${form}` : ""} · ${s.view === "paper" ? "2D" : "3D"}${tl} · ${s.holo ? "hologrammal" : "hologram nélkül"}`;
+  return `${recOf(s.id).name} · ${s.view === "paper" ? "2D" : "3D"} · ${s.label}`;
 }
-/** Egy lépés beállítása a nézegetőben (csak azt építi újra, ami változott). */
-function applyDebugStep(s, play) {
-  const formChanged = !st.rec || st.rec.id !== s.id || st.cfg !== s.cfg || st.vkey !== s.vkey || st.tl !== s.tl;
-  const viewChanged = S.view !== s.view;
-  S.view = s.view;
-  S.holo = s.holo;
-  st.playing = !!play;
-  st.t = play ? 0 : s.t;
-  if (formChanged) {
-    st.rec = recOf(s.id);
-    st.di = DI.has(s.id);
-    st.poly = POLY.has(s.id);
-    st.cfg = s.cfg;
-    st.vkey = s.vkey;
-    st.tl = s.tl;
-    rebuild(true);
-    markCurrent();
-  } else if (viewChanged) {
-    pickModels();
-    fitCamera();
-    updateStaticUI();
-    changed();
-  } else {
-    updateStaticUI();
-    changed();
-  }
+/** Egy beállítás értékének átírása, és ami ezzel jár (színek, kamera, kezelőszervek). */
+function dbgSet(key, value) {
+  const parts = key.split(".");
+  const wasSf = S.style === "sf";
+  if (parts.length === 2) S[parts[0]][parts[1]] = value;
+  else S[key] = value;
+  if (parts[0] === "colors") refreshHl();
+  if (parts[0] === "el") refreshElColors();
+  if (key === "style" && wasSf !== (S.style === "sf")) fitCamera();
   syncControls();
+  updateStaticUI();
+  changed();
+}
+/** A molekula formájának váltása (D/L, gyűrű, anomer), mint a Forma résznél. */
+function dbgForm(key, value) {
+  const r = st.rec;
+  if (key === "cfg") st.cfg = value;
+  else if (st.di) st.vkey = value;
+  else {
+    const [ring, an] = (st.vkey || "p-a").split("-");
+    const want = key === "ring" ? `${value}-${an}` : `${ring}-${value}`;
+    const v = r.v.find((x) => x.key === want) || r.v.find((x) => (key === "ring" ? x.ring === value : x.an === value));
+    if (v) st.vkey = v.key;
+  }
+  st.playing = false;
+  rebuild(false);
+}
+/** Az eredeti beállítások visszaírása (a nézet kivételével, az a futás nézete marad). */
+function dbgRestoreSettings(O, view) {
+  for (const k of Object.keys(O)) SV[k] = clone(O[k]);
+  if (view) SV.view = view;
+  refreshHl();
+  refreshElColors();
+  syncControls();
+}
+function applyDebugStep(s, O, form0) {
+  st.playing = false;
+  switch (s.type) {
+    case "load":
+      dbgRestoreSettings(O, s.view);
+      load(s.id);
+      form0.cfg = st.cfg; form0.vkey = st.vkey; form0.tl = st.tl;
+      syncControls();
+      break;
+    case "anim":
+      if (hasTimeline()) { st.t = 0; st.playing = true; changed(); }
+      break;
+    case "tl":
+      st.tl = s.value;
+      st.t = 1;
+      rebuild(true);
+      break;
+    case "set":
+      dbgSet(s.key, s.value);
+      break;
+    case "form":
+      dbgForm(s.key, s.value);
+      break;
+    case "restoreAll": {
+      dbgRestoreSettings(O, s.view);
+      const formChanged = st.cfg !== form0.cfg || st.vkey !== form0.vkey || st.tl !== form0.tl;
+      st.cfg = form0.cfg; st.vkey = form0.vkey; st.tl = form0.tl;
+      if (formChanged) { st.t = 1; rebuild(true); } else { updateStaticUI(); changed(); }
+      break;
+    }
+  }
 }
 /** Automatikus ellenőrzés: érvénytelen koordináta, megnyúlt kötés, egymásba lógó atomok. */
 function debugCheck() {
@@ -2367,29 +3243,32 @@ const dbgFrame = () => new Promise((res) => {
 });
 async function runDebug() {
   if (DBG.running) return;
-  const plan = debugPlan(SH.dbg.groups);
+  const mode = currentMode();
+  if (mode !== "view") setMode("view"); // a hibakereső a nézegetőben fut
+  const O = clone(SV);
+  const opt = clone(SH.dbg);
+  const plan = debugPlan(opt, O);
   if (!plan.length) return;
-  DBG.saved = { quiz: Q.on, id: st.rec.id, cfg: st.cfg, vkey: st.vkey, tl: st.tl, t: st.t, view: SV.view, holo: SV.holo };
-  if (Q.on) setMode("view");
+  DBG.saved = { mode, O, id: st.rec.id, cfg: st.cfg, vkey: st.vkey, tl: st.tl, t: st.t };
   Object.assign(DBG, { running: true, stop: false, i: 0, total: plan.length, issues: [], slow: null, cur: null, done: null });
   closeDrawers();
   hideModal("#dbgBg");
   syncDebugUI();
-  const wait = Math.min(60, Math.max(0.1, +SH.dbg.sec || 1)) * 1000;
+  const wait = Math.min(60, Math.max(0.1, +opt.sec || 1)) * 1000;
+  const form0 = {};
   for (const step of plan) {
     if (DBG.stop) break;
     DBG.cur = step;
-    const play = step.play && SH.dbg.play;
     const t0 = performance.now();
-    applyDebugStep(step, play);
+    applyDebugStep(step, O, form0);
     renderFrame();
     const dt = performance.now() - t0;
     if (!DBG.slow || dt > DBG.slow.ms) DBG.slow = { ms: dt, label: stepLabel(step) };
     updateDebugProgress();
     await dbgFrame();
-    if (play) {
-      // lejátszás nyílttól zártig, majd az ellenőrzés a végállapoton
-      const limit = performance.now() + (DBG_DUR(step) / (S.speed || 1) + 3) * 1000;
+    if (step.type === "anim" && st.playing) {
+      // lejátszás nyílttól zártig; az ellenőrzés a végállapoton
+      const limit = performance.now() + (DBG_ANIM_SEC(step, st.tl) / (S.speed || 1) + 3) * 1000;
       while (st.playing && !DBG.stop && performance.now() < limit) await dbgSleep(100);
       st.playing = false;
       st.t = 1;
@@ -2413,8 +3292,7 @@ function finishDebug() {
   DBG.stop = false;
   st.playing = false;
   const sv = DBG.saved;
-  SV.view = sv.view;
-  SV.holo = sv.holo;
+  dbgRestoreSettings(sv.O);
   st.rec = recOf(sv.id);
   st.di = DI.has(sv.id);
   st.poly = POLY.has(sv.id);
@@ -2425,7 +3303,7 @@ function finishDebug() {
   rebuild(true);
   markCurrent();
   syncControls();
-  if (sv.quiz) setMode("quiz");
+  if (sv.mode !== "view") setMode(sv.mode);
   DBG.done = { stopped, i: DBG.i, total: DBG.total };
   save();
   syncDebugUI();
@@ -2453,11 +3331,15 @@ function syncDebugUI() {
   $("#dbgMonoT").textContent = `Monoszacharidok (${DATA.monos.length})`;
   $("#dbgDiT").textContent = `Diszacharidok (${DATA.dis.length})`;
   $("#dbgPolyT").textContent = `Poliszacharidok (${POLYS.length})`;
-  $("#dbgPlay").checked = !!d.play;
-  const plan = debugPlan(d.groups);
+  $$("#dbgViews button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === (d.views || "both"))));
+  $$("#dbgRestore button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === (d.restore || "step"))));
+  $("#dbgHolo").checked = d.holo !== false;
+  const plan = debugPlan(d);
   const sec = Math.min(60, Math.max(0.1, +d.sec || 1));
-  const playTime = d.play ? plan.filter((s) => s.play).reduce((a, s) => a + DBG_DUR(s) / (S.speed || 1), 0) : 0;
-  $("#dbgPlan").textContent = `${plan.length} lépés, kb. ${fmtDuration(plan.length * sec + playTime)}. Futás közben a Debugger gombbal vagy a 3D-tér tetején lévő gombbal állítható le.`;
+  const animTime = plan.filter((s) => s.type === "anim").reduce((a, s) => a + DBG_ANIM_SEC(s, s.tl) / (SV.speed || 1), 0);
+  const mols = plan.filter((s) => s.type === "load").length;
+  $("#dbgPlan").textContent = `${mols} megjelenítés, összesen ${plan.length} lépés, kb. ${fmtDuration(plan.length * sec + animTime)}. ` +
+    "Futás közben a Debugger gombbal vagy a 3D-tér tetején lévő gombbal állítható le.";
   const status = running || DBG.done;
   $("#dbgStatus").hidden = !status;
   if (!status) return;
@@ -2483,6 +3365,7 @@ function applyDev() {
   if (!SH.dev) stopDebug();
   syncDebugUI();
   renderQuiz();
+  if (A.on) updateAnaForm();
 }
 function bindDebugger() {
   $("#btnDebug").addEventListener("click", () => {
@@ -2519,7 +3402,16 @@ function bindDebugger() {
       syncDebugUI();
     });
   }
-  $("#dbgPlay").addEventListener("change", (e) => { SH.dbg.play = e.target.checked; save(); syncDebugUI(); });
+  for (const [id, key] of [["#dbgViews", "views"], ["#dbgRestore", "restore"]]) {
+    $(id).addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      SH.dbg[key] = b.dataset.v;
+      save();
+      syncDebugUI();
+    });
+  }
+  $("#dbgHolo").addEventListener("change", (e) => { SH.dbg.holo = e.target.checked; save(); syncDebugUI(); });
   $("#dbgOff").addEventListener("click", () => {
     SH.dev = false;
     save();
@@ -2538,6 +3430,7 @@ bindQuizSettings();
 syncQuizSettings();
 bindModals();
 bindQuizPop();
+bindAna();
 bindDebugger();
 bindLayout();
 resetScroll();
@@ -2548,9 +3441,11 @@ const startId = decodeURIComponent((location.hash || "").slice(1));
 load(recOf(startId) ? startId : "glukoz");
 renderQuiz();
 if (startId === "tippelo") setMode("quiz");
+else if (startId === "analizalo") setMode("ana");
 window.addEventListener("hashchange", () => {
   const id = decodeURIComponent(location.hash.slice(1));
   if (id === "tippelo") setMode("quiz");
-  else if (recOf(id) && (Q.on || id !== st.rec.id)) { setMode("view"); select(id); }
+  else if (id === "analizalo") setMode("ana");
+  else if (recOf(id) && (Q.on || A.on || id !== st.rec.id)) { setMode("view"); select(id); }
 });
 requestAnimationFrame(loop);
