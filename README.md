@@ -77,9 +77,9 @@ megtekintéséhez.
     - a gyűrűzáródás animációja (kikapcsolható).
   - A megjelenítési beállításokat a nézegetőtől veszi át, de külön állíthatók.
   - A pontszámot a böngésző megjegyzi.
-- **Analizáló:** fent átkapcsolható. Egy véletlenszerű, gyűrűs formájú mono-
-  vagy diszacharidot ad, teljesen szürkén, és mindent neked kell rajta
-  megadni.
+- **Analizáló:** fent átkapcsolható. Egy véletlenszerű mono- vagy
+  diszacharidot ad gyűrűs vagy nyílt láncú formában, teljesen szürkén, és
+  mindent neked kell rajta megadni.
   - Atomokra kattintva fel kell iratozni őket: elem, sorszám (az O és a H a
     szénatomjáét kapja), diszacharidnál az egység (′), valamint a szerep
     (glikozidos OH, gyűrű-O, ficak, kamuficak, a glikozidos kötés O-ja).
@@ -92,9 +92,11 @@ megtekintéséhez.
   - A bal oldali listában karikával jelölöd ki, miből válasszon (elsőre a
     csillagozottak vannak bekarikázva).
   - Beállítható, hogy a H-atomokat és a sima OH-csoportokat fel kell-e
-    iratozni, meg vannak-e adva, vagy rejtve legyenek, valamint a nézet.
-  - Egyelőre csak gyűrűs formájú mono- és diszacharidok szerepelnek, ezért itt
-    nincs animáció.
+    iratozni, meg vannak-e adva, vagy rejtve legyenek, valamint a nézet és a
+    forma (gyűrűs, nyílt lánc vagy vegyesen).
+  - Nyílt láncban nincs gyűrű és anomer, ezért a gyűrűhöz kötött szerepeket
+    sem kell megadni. Diszacharidnál csak a redukáló vég egysége nyílik fel.
+  - Az animáció csak a Kiértékelés után játszható le.
 - **Redukáló-e:** a nézegetőben minden molekulánál látszik, rövid magyarázattal.
 - **Elrendezés:** a két oldalsó panel a felső sáv gombjaival elrejthető.
   - A széle húzásával átméretezhető; nagyon keskenyre húzva eltűnik, dupla
@@ -106,8 +108,24 @@ megtekintéséhez.
   - Alacsony ablakban a fejléc tömörebb, a leírás az „i” gombbal nyitható.
 - **Nyitóablak** rövid leírással (eszközönként kikapcsolható), fent
   **Redeem code** (kódbeváltás) és **Report bugs** (hibabejelentés).
-- **Fejlesztői mód** (kóddal kapcsolható be).
+- **Tanár mód** (kóddal kapcsolható be).
   - A Tippelőben és az Analizálóban narancssárga jelöli a jó választ.
+  - Megjelenik a **Nyomda** a Nézegető és a Tippelő között: képek
+    feladatlapokhoz.
+    - Olyan, mint a nézegető, de lejátszás helyett exportálni lehet. A kép
+      mindig vektoros (SVG), és pontosan úgy készül, ahogy a középső részen
+      látszik (nagyítás, elforgatás, 3D vagy 2D, nyílt vagy gyűrűs forma).
+    - Letölthető vagy új lapon megnyitható; kérhető nagy felbontású PNG is.
+    - A molekulaválasztó és a csillagok közösek a nézegetővel, a
+      megjelenítési beállítások viszont külön vannak.
+    - Saját beállítások: színes vagy fekete-fehér; teli vagy üreges atomok és
+      kötések (a körvonal a belső szín sötétebb változata, vagy mindig
+      fekete); feliratok (nincs, C-atomok, minden atom a H-k nélkül, minden
+      atom, vagy csak a kattintással kiválasztottak), a szerep is a
+      feliratban; körbevágás a molekulára; fehér vagy átlátszó háttér.
+- **Fejlesztői mód** (kóddal kapcsolható be).
+  - A Tippelőben és az Analizálóban narancssárga jelöli a jó választ, és a
+    Nyomda is látszik.
   - A **Debugger** a nézegetőben fut. A lista sorrendjében végigmegy a kijelölt
     csoportok molekuláin:
     - mindegyiket megjeleníti és lejátssza az animációt;

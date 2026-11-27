@@ -77,10 +77,12 @@ const DEFAULTS = {
 };
 const SH_DEFAULTS = {
   fav: [], favFirst: false, xset: null, xFirst: false, score: { ok: 0, total: 0 },
-  introHidden: false, codes: [], dev: false,
+  introHidden: false, codes: [], dev: false, teach: false,
+  // nyomda: fekete-fehér, teli/üreges, mindig fekete körvonal, feliratok, szerep a feliratban, háttér
+  print: { bw: false, fill: "filled", blackOutline: false, labels: "carbons", roles: false, bg: "white", crop: false },
   // analizáló: karikás kijelölés (elsőre a csillagozottak), beállítások, pontszám
   oset: null, oFirst: false,
-  ana: { view: "3d", source: "o", h: "label", oh: "label", askBond: true },
+  ana: { view: "3d", form: "mix", source: "o", h: "label", oh: "label", askBond: true },
   anaScore: { ok: 0, total: 0, pts: 0, max: 0 },
   quiz: {
     view: "3d", source: "x", count: 4, perRow: 0, formula: true,
@@ -109,15 +111,16 @@ function mergeInto(base, raw) {
   }
   return base;
 }
-const { SV, SQ0, SH } = (() => {
+const { SV, SQ0, SP0, SH } = (() => {
   const SV = clone(DEFAULTS), SH = clone(SH_DEFAULTS);
-  let SQ0 = null;
+  let SQ0 = null, SP0 = null;
   try {
     const raw = JSON.parse(localStorage.getItem(STORE) || "null");
     if (raw) {
       mergeInto(SV, raw.v);
       mergeInto(SH, raw.sh);
       if (raw.q) SQ0 = mergeInto(clone(DEFAULTS), raw.q);
+      if (raw.pr) SP0 = mergeInto(clone(DEFAULTS), raw.pr);
     } else {
       // korábbi változat beállításainak átvétele
       const old = JSON.parse(localStorage.getItem("szenhidrat3d.v1") || "null");
@@ -129,9 +132,13 @@ const { SV, SQ0, SH } = (() => {
       }
     }
   } catch { /* nincs tárolás */ }
-  return { SV, SQ0, SH };
+  return { SV, SQ0, SP0, SH };
 })();
 let SQ = SQ0; // a tippelő megjelenítési beállításai (az első belépéskor jön létre)
+let SPR = SP0; // a nyomda megjelenítési beállításai (az első belépéskor a nézegetőéből)
+/** Tanár módban (és fejlesztői módban) a jó válaszok narancssárgán látszanak, és elérhető a Nyomda. */
+const showAnswers = () => !!(SH.dev || SH.teach);
+const canPrint = () => !!(SH.dev || SH.teach);
 let S = SV; // az éppen érvényes megjelenítési beállítások
 const TOGGLES = ["showH", "showOH", "labels", "ringFill", "hlOpen", "autoRotate"];
 const TOGGLE_ID = { labels: "showLabels" };
@@ -139,7 +146,7 @@ const TOGGLE_ID = { labels: "showLabels" };
 const DBG = { running: false, stop: false, i: 0, total: 0, issues: [], slow: null, saved: null, cur: null, done: null };
 const save = () => {
   if (DBG.running) return;
-  try { localStorage.setItem(STORE, JSON.stringify({ v: SV, q: SQ, sh: SH })); } catch { /* nincs tárolás */ }
+  try { localStorage.setItem(STORE, JSON.stringify({ v: SV, q: SQ, pr: SPR, sh: SH })); } catch { /* nincs tárolás */ }
 };
 
 // ---------------------------------------------------------------------------
@@ -381,6 +388,8 @@ class Batch {
     this.C = mesh.instanceColor.array;
     this.A = this.alphaAttr.array;
     this.ids = new Int32Array(cap); // példány → atom (ill. kötés) sorszáma
+    this.atom = new Int32Array(cap); // kötésfélnél: melyik atomhoz tartozik
+    this.side = new Int8Array(cap); // kötésfélnél: 0 = az eleje, 1 = a vége az atom (a vektoros képhez)
     this.n = 0;
   }
   /** Új példány; visszaadja a mátrixának helyét a tömbben. */
@@ -543,12 +552,14 @@ class Layer {
   /** A példány csoportja az átlátszóság szerint (a hologramnál mindig ugyanaz). */
   pick(list, a) { return this.holo || a >= 0.995 ? list[0] : a > 0.6 ? list[1] : list[2]; }
   /** Egy kötésfél (henger) a-tól b-ig, r sugárral. */
-  cylinder(id, ci, ax, ay, az, bx, by, bz, r, alpha) {
+  cylinder(id, ci, ax, ay, az, bx, by, bz, r, alpha, side) {
     const dx = bx - ax, dy = by - ay, dz = bz - az;
     const L = Math.hypot(dx, dy, dz);
     if (L < 1e-6 || alpha < 0.01 || r <= 0) return;
     const b = this.pick(this.cyl, alpha);
     const o = b.push(id, this.cols, ci, alpha);
+    b.atom[o / 16] = ci / 3;
+    b.side[o / 16] = side;
     vD.set(dx / L, dy / L, dz / L);
     qT.setFromUnitVectors(UP, vD);
     pT.set((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2);
@@ -592,8 +603,8 @@ class Layer {
         const s2 = b.second(t);
         const ci = 3 * b.i, cj = 3 * b.j;
         if (!(s2 > 0.001)) {
-          this.cylinder(n, ci, vA.x, vA.y, vA.z, vM.x, vM.y, vM.z, R.bond, a0);
-          this.cylinder(n, cj, vM.x, vM.y, vM.z, vB.x, vB.y, vB.z, R.bond, a0);
+          this.cylinder(n, ci, vA.x, vA.y, vA.z, vM.x, vM.y, vM.z, R.bond, a0, 0);
+          this.cylinder(n, cj, vM.x, vM.y, vM.z, vB.x, vB.y, vB.z, R.bond, a0, 1);
           continue;
         }
         // kettős kötés: két párhuzamos henger, a síkjuk egy szomszéd atom felé áll
@@ -609,8 +620,8 @@ class Layer {
         for (const [sign, am] of [[1, 1], [-1, s2]]) {
           const ox = vO.x * sign * off, oy = vO.y * sign * off, oz = vO.z * sign * off;
           const mx = vM.x + ox, my = vM.y + oy, mz = vM.z + oz;
-          this.cylinder(n, ci, vA.x + ox, vA.y + oy, vA.z + oz, mx, my, mz, rad, a0 * am);
-          this.cylinder(n, cj, mx, my, mz, vB.x + ox, vB.y + oy, vB.z + oz, rad, a0 * am);
+          this.cylinder(n, ci, vA.x + ox, vA.y + oy, vA.z + oz, mx, my, mz, rad, a0 * am, 0);
+          this.cylinder(n, cj, mx, my, mz, vB.x + ox, vB.y + oy, vB.z + oz, rad, a0 * am, 1);
         }
       }
     }
@@ -748,7 +759,7 @@ function fitCamera() {
   const tv = Math.tan((camera.fov * Math.PI) / 360), th = tv * aspect;
   const pad = S.style === "sf" ? 1.7 : 0.75;
   let d = 0;
-  for (const t of A.on ? [1] : [0, 0.35, 0.65, 1]) {
+  for (const t of anaMasked() ? [st.t] : [0, 0.35, 0.65, 1]) {
     const X = model.frame(t);
     for (let i = 0; i < X.length; i += 3) {
       const x = Math.abs(X[i]) + pad, y = Math.abs(X[i + 1]) + pad, z = X[i + 2];
@@ -788,8 +799,16 @@ const isFav = (id) => SH.fav.includes(id);
 const isX = (id) => (SH.xset || []).includes(id);
 const O_SVG = `<svg class="om" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.2"/></svg>`;
 const isO = (id) => (SH.oset || []).includes(id);
-/** Az analizálóban (egyelőre) csak a gyűrűs formájú mono- és diszacharidok szerepelnek. */
-const anaEligible = (id) => (MONO.has(id) && MONO.get(id).v.length > 0) || DI.has(id);
+/** Az analizálóban a mono- és diszacharidok szerepelnek (gyűrűs és nyílt formában). */
+const anaEligible = (id) => MONO.has(id) || DI.has(id);
+/** Milyen formában elemezhető a molekula a beállítás szerint: gyűrűs ("ring") és/vagy nyílt ("open"). */
+function anaForms(id) {
+  const r = recOf(id), f = [];
+  if (DI.has(id) || r.v.length) f.push("ring");
+  if (MONO.has(id) || r.reducing) f.push("open"); // a nem redukáló diszacharidnak nincs nyílt formája
+  const want = SH.ana.form || "mix";
+  return want === "mix" ? f : f.filter((x) => x === want);
+}
 const ALL_IDS = [...DATA.monos.map((m) => m.id), ...DATA.dis.map((d) => d.id), ...POLYS.map((p) => p.id)];
 const recOf = (id) => MONO.get(id) || DI.get(id) || POLY.get(id);
 const kindOf = (id) => (MONO.has(id) ? "mono" : DI.has(id) ? "di" : "poly");
@@ -835,7 +854,7 @@ function itemButton(id, name, meta, metaMono, search) {
   o.disabled = !ok;
   o.setAttribute("aria-pressed", String(ok && isO(id)));
   o.setAttribute("aria-label", `${name} bekarikázása az analizálóhoz`);
-  o.title = ok ? "Bekarikázás az analizálóhoz" : "Az analizálóban egyelőre csak gyűrűs mono- és diszacharidok vannak";
+  o.title = ok ? "Bekarikázás az analizálóhoz" : "Az analizálóban csak mono- és diszacharidok vannak";
   o.innerHTML = O_SVG;
   li.append(b, s, x, o);
   return li;
@@ -1363,12 +1382,12 @@ function bindLayout() {
 
 /** A tippelőben (ha úgy van beállítva) válasz előtt nincs animáció: csak a kész forma látszik. */
 // (az analizálóban csak a gyűrűs forma látszik, ott nincs animáció)
-const quizAnimLocked = () => (Q.on && !Q.answered && SH.quiz.anim === false) || A.on;
+const quizAnimLocked = () => (Q.on && !Q.answered && SH.quiz.anim === false) || anaMasked();
 function hasTimeline() {
   return !!model && model.kind !== "static" && !quizAnimLocked();
 }
 function togglePlay() {
-  if (!hasTimeline()) return;
+  if (!hasTimeline() || NY.on) return; // a nyomdában nincs animáció
   if (st.playing) { st.playing = false; changed(); return; }
   if (st.t >= 1) st.t = 0;
   st.playing = true;
@@ -1415,12 +1434,15 @@ const Q = {
 // ---- analizáló (állapot; a működése lejjebb) ----
 const A = {
   on: false, id: null, last: null, done: false, view: "3d",
+  t: 1, // a feladat állapota: 1 = gyűrűs forma, 0 = nyílt lánc
   labels: new Map(), // atom → { el, num, prime, role }: a felhasználó feliratai
   ans: {}, // a felső részen megadott adatok (pl. cfg, ring, an, name, formula; diszacharidnál u1.*, u2.*, bond, red)
   truth: null, // a helyes válaszok: { atoms: [...], form: {...} }
   res: null, // a kiértékelés eredménye
 };
-const currentMode = () => (Q.on ? "quiz" : A.on ? "ana" : "view");
+// ---- nyomda (állapot; a működése lejjebb) ----
+const NY = { on: false, picks: new Set(), pickKey: "", html: "" };
+const currentMode = () => (Q.on ? "quiz" : A.on ? "ana" : NY.on ? "print" : "view");
 /** Az analizálóban kiértékelés előtt: a modell szürke, a helyes válaszok rejtve. */
 const anaMasked = () => A.on && !A.done;
 /** Válasz előtt rejtve marad minden, ami elárulná a megoldást (tippelő és analizáló). */
@@ -1559,7 +1581,7 @@ function openQuizPop(id, btn, ask) {
     for (const b of $$("button", row)) {
       b.setAttribute("aria-pressed", "false");
       // fejlesztői mód: a jó választás narancssárga keretet kap
-      b.classList.toggle("dev-ok", !!SH.dev && id === Q.id && Q.truth[k] === b.dataset.v);
+      b.classList.toggle("dev-ok", showAnswers() && id === Q.id && Q.truth[k] === b.dataset.v);
     }
   }
   $$("#qOpts .opt").forEach((o) => o.classList.toggle("sel", o === btn));
@@ -1657,6 +1679,9 @@ function applyModeUI() {
   $(".title-block").hidden = Q.on || A.on;
   $(".app").classList.toggle("quiz-mode", Q.on);
   $(".app").classList.toggle("ana-mode", A.on);
+  $(".app").classList.toggle("ana-done", A.on && A.done); // kiértékelés után az animáció is lejátszható
+  $(".app").classList.toggle("print-mode", NY.on);
+  $('#segMode button[data-v="print"]').hidden = !canPrint();
   const cur = currentMode();
   $$("#segMode button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === cur)));
 }
@@ -1693,9 +1718,9 @@ function renderQuiz() {
       b.disabled = true;
       if (id === Q.id) b.classList.add(Q.wrong.length ? "half" : "ok");
       else if (id === Q.picked) b.classList.add("bad");
-    } else if (SH.dev && id === Q.id) {
+    } else if (showAnswers() && id === Q.id) {
       b.classList.add("dev-ok"); // fejlesztői mód: a jó válasz narancssárga
-      b.title = "Fejlesztői mód: ez a jó válasz";
+      b.title = "Ez a jó válasz (tanár/fejlesztői mód)";
     }
     $("#qOpts").appendChild(b);
   }
@@ -1769,10 +1794,15 @@ function fieldDef(key) {
   return b ? AF[b === "name" ? "uname" : b] : AF[a];
 }
 function anaRows() {
-  if (!st.di) return [["", ["cfg", "ring", "an"]], ["", ["name", "formula"]]];
+  const open = A.t === 0;
+  if (!st.di) {
+    // nyílt láncban nincs gyűrű és anomer; a D/L csak királis molekulánál értelmezhető
+    const top = [...(st.rec.cfg ? ["cfg"] : []), ...(open ? [] : ["ring", "an"])];
+    return [...(top.length ? [["", top]] : []), ["", ["name", "formula"]]];
+  }
   return [
     ["1. egység", ["u1.name", "u1.cfg", "u1.ring", "u1.an"]],
-    ["2. egység (′)", ["u2.name", "u2.cfg", "u2.ring", "u2.an"]],
+    ["2. egység (′)", open ? ["u2.name", "u2.cfg"] : ["u2.name", "u2.cfg", "u2.ring", "u2.an"]],
     ["", [...(SH.ana.askBond !== false ? ["bond"] : []), "red"]],
     ["", ["name", "formula"]],
   ];
@@ -1801,10 +1831,12 @@ const fmtAtom = (L) => `${L.el}${L.num ? `${L.num}${st.di && L.prime ? "′" : "
 const fmtAtomRole = (L) => `${fmtAtom(L)}${L.role && L.role !== "none" ? ` · ${ROLE_SHORT[L.role]}` : ""}`;
 
 function anaPool() {
-  const all = ALL_IDS.filter(anaEligible);
+  const ok = (id) => anaEligible(id) && anaForms(id).length > 0;
+  const all = ALL_IDS.filter(ok);
   if (SH.ana.source === "all") return { ids: all, all: true };
-  const ids = (SH.oset || []).filter(anaEligible);
-  if (!ids.length) return { ids: all, all: true, fallback: true };
+  const ids = (SH.oset || []).filter(ok);
+  // ha nincs bekarikázott, vagy egyik sem kérdezhető a választott formában, az összesből választ
+  if (!ids.length) return { ids: all, all: true, fallback: (SH.oset || []).some(anaEligible) ? "form" : "empty" };
   return { ids, all: false };
 }
 function parseUnits(name) {
@@ -1816,7 +1848,7 @@ function parseUnits(name) {
 }
 /** A helyes válaszok a betöltött molekulából: atomonként elem, sorszám (′) és szerep; a forma és a nevek. */
 function anaTruth() {
-  const m = models.m3, r = st.rec, t = 1;
+  const m = models.m3, r = st.rec, t = A.t, open = t === 0;
   const nb = Array.from({ length: m.N }, () => []);
   for (const b of m.bonds) if (b.alpha(t) > 0.5) { nb[b.i].push(b.j); nb[b.j].push(b.i); }
   // a sorszám a szénatomé: az O és a H a hozzá tartozó szénatom számát kapja
@@ -1830,18 +1862,24 @@ function anaTruth() {
       const j = nb[i].find((x) => m.el[x] !== "H");
       p = j === undefined ? { num: 0, prime: false } : parse(m.lab[j]);
     } else p = parse(m.lab[i]);
-    atoms[i] = { el, num: p.num, prime: p.prime, role: m.groupOf[i] || "none" };
+    // nyílt láncban a gyűrűs forma szerepei (gyűrű-O, glikozidos OH, ficak…) még nem léteznek
+    let role = m.groupOf[i] || "none";
+    if (open && (!st.di || (p.prime && role !== "bridge"))) role = "none";
+    atoms[i] = { el, num: p.num, prime: p.prime, role };
   }
   const v = r.v.find((x) => x.key === st.vkey);
   const form = {};
-  if (!st.di) Object.assign(form, { cfg: st.cfg, ring: v.ring, an: v.an });
-  else {
+  if (!st.di) {
+    if (r.cfg) form.cfg = st.cfg;
+    if (!open) Object.assign(form, { ring: v.ring, an: v.an });
+  } else {
     const [u1, u2] = parseUnits(v.name);
     Object.assign(form, {
       "u1.name": r.A, "u1.cfg": u1.cfg, "u1.ring": u1.ring, "u1.an": u1.an,
-      "u2.name": r.B, "u2.cfg": u2.cfg, "u2.ring": u2.ring, "u2.an": u2.an,
+      "u2.name": r.B, "u2.cfg": u2.cfg,
       bond: r.link, red: r.reducing ? "y" : "n",
     });
+    if (!open) Object.assign(form, { "u2.ring": u2.ring, "u2.an": u2.an });
   }
   form.name = r.id;
   form.formula = r.formula;
@@ -1855,11 +1893,16 @@ function anaNew() {
   if (!cand.length) cand = pool.ids;
   const id = cand[Math.floor(Math.random() * cand.length)];
   const rec = recOf(id);
-  Object.assign(A, { id, last: id, done: false, labels: new Map(), ans: {}, truth: null, res: null });
+  const forms = anaForms(id), form = forms[Math.floor(Math.random() * forms.length)];
+  Object.assign(A, { id, last: id, done: false, labels: new Map(), ans: {}, truth: null, res: null, t: form === "open" ? 0 : 1 });
   A.view = SH.ana.view === "mix" ? (Math.random() < 0.5 ? "3d" : "paper") : SH.ana.view;
-  const v = rec.v[Math.floor(Math.random() * rec.v.length)];
+  const v = rec.v.length ? rec.v[Math.floor(Math.random() * rec.v.length)] : null;
   const cfg = MONO.has(id) && rec.cfg ? (Math.random() < 0.5 ? "D" : "L") : undefined;
-  load(id, { vkey: v.key, cfg });
+  load(id, { vkey: v ? v.key : null, cfg });
+  // nyílt forma: a gyűrűzáródás elején (diszacharidnál a redukáló vég nyílt)
+  st.playing = false;
+  st.t = A.t;
+  fitCamera();
   anaTruth();
   refreshAnaLabels();
   renderAna();
@@ -1945,10 +1988,12 @@ function renderAna() {
   const sc = SH.anaScore;
   $("#aScore").textContent = `Hibátlan: ${sc.ok} / ${sc.total}${sc.max ? ` · átlag ${Math.round((100 * sc.pts) / sc.max)}%` : ""}`;
   const pool = anaPool();
-  $("#aPool").textContent = pool.fallback
-    ? `Még nincs bekarikázott molekula, ezért az összes (${pool.ids.length}) gyűrűs mono- és diszacharidból választok. A bal oldali listában karikával szűkítheted.`
+  $("#aPool").textContent = pool.fallback === "form"
+    ? `A bekarikázott molekulák egyike sem kérdezhető a választott formában (pl. a nem redukáló diszacharidoknak nincs nyílt formája), ezért az összes (${pool.ids.length}) molekulából választok.`
+    : pool.fallback
+    ? `Még nincs bekarikázott molekula, ezért az összes (${pool.ids.length}) mono- és diszacharidból választok. A bal oldali listában karikával szűkítheted.`
     : pool.all
-      ? `Az összes (${pool.ids.length}) gyűrűs mono- és diszacharidból választok.`
+      ? `Az összes (${pool.ids.length}) mono- és diszacharidból választok.`
       : `${azA(pool.ids.length, true)} ${pool.ids.length} bekarikázott molekulából választok.`;
   const box = $("#aForm");
   box.innerHTML = "";
@@ -1973,6 +2018,13 @@ function renderAna() {
         const f = anaFieldEl(key, true);
         f.classList.add("cell");
         tbl.appendChild(f);
+      }
+      if (keys.length < 4) {
+        const na = document.createElement("span");
+        na.className = "na";
+        na.style.gridColumn = `span ${4 - keys.length}`;
+        na.textContent = "nyílt lánc: nincs gyűrű és anomer";
+        tbl.appendChild(na);
       }
     }
     box.appendChild(tbl);
@@ -2000,7 +2052,7 @@ function updateAnaForm() {
     if (d.seg) {
       for (const b of $$("button", f)) {
         b.setAttribute("aria-pressed", String(b.dataset.v === val));
-        b.classList.toggle("dev-ok", !!SH.dev && !A.done && b.dataset.v === tv);
+        b.classList.toggle("dev-ok", showAnswers() && !A.done && b.dataset.v === tv);
         b.classList.toggle("ok", A.done && b.dataset.v === tv);
         b.classList.toggle("bad", A.done && b.dataset.v === val && val !== tv);
         b.disabled = A.done;
@@ -2040,13 +2092,14 @@ function updateAnaProgress() {
     const c = c0;
     msg.innerHTML = `Feliratozva: <b>${c.done}/${c.need}</b> atom · kitöltve: <b>${c.filled}/${c.keys}</b> adat. Kattints egy atomra a feliratozáshoz!`;
     $("#aCheck").hidden = false;
-    $("#aFill").hidden = !SH.dev;
+    $("#aFill").hidden = !showAnswers();
     $("#aNext").textContent = "Másikat kérek";
     return;
   }
   const R = A.res, pts = R.aOk + R.fOk, max = R.aTot + R.fTot;
   const head = pts === max ? "Hibátlan!" : `Eredmény: ${pts}/${max} pont (${Math.round((100 * pts) / max)}%).`;
-  msg.innerHTML = `<b>${head}</b> Atomok: ${R.aOk}/${R.aTot} · adatok: ${R.fOk}/${R.fTot}. A molekula: <b></b> · <span></span>`;
+  const anim = hasTimeline() ? " Most már lejátszhatod az animációt is." : "";
+  msg.innerHTML = `<b>${head}</b> Atomok: ${R.aOk}/${R.aTot} · adatok: ${R.fOk}/${R.fTot}. A molekula: <b></b> · <span></span>.${anim}`;
   msg.querySelector("b:last-of-type").textContent = st.rec.name;
   msg.querySelector("span").textContent = stateName();
   $("#aCheck").hidden = true;
@@ -2055,7 +2108,7 @@ function updateAnaProgress() {
 }
 /** Fejlesztői mód: minden feliratot és adatot kitölt a helyes válasszal (ellenőrzéshez). */
 function anaFill() {
-  if (!A.on || A.done || !A.truth || !SH.dev) return;
+  if (!A.on || A.done || !A.truth || !showAnswers()) return;
   const T = A.truth;
   T.atoms.forEach((t, i) => { if (t && anaState(i) === "need") A.labels.set(i, { ...t }); });
   for (const k of anaKeys()) A.ans[k] = T.form[k];
@@ -2102,8 +2155,11 @@ function anaEvaluate() {
 // ---- atom feliratozása (felugró menü) ----
 const AP = { i: null, pick: {}, fresh: true, x: 0, y: 0 };
 const AP_NAMES = { el: "elem", num: "sorszám", prime: "egység", role: "szerep" };
+/** Szerepet csak ott kérdez, ahol van gyűrű (nyílt láncú monoszacharidnál nincs). */
+const anaAskRole = () => !(A.t === 0 && !st.di);
 function anaPopNeeds() {
-  const k = ["el", "num", "role"];
+  const k = ["el", "num"];
+  if (anaAskRole()) k.push("role");
   if (st.di && AP.pick.num !== "0") k.push("prime");
   return k;
 }
@@ -2131,11 +2187,11 @@ function updateAnaPop() {
   const T = A.truth && A.truth.atoms[AP.i];
   for (const row of $$("#aPop .qpop-row")) {
     const k = row.dataset.k;
-    row.hidden = k === "prime" && (!st.di || AP.pick.num === "0");
+    row.hidden = (k === "prime" && (!st.di || AP.pick.num === "0")) || (k === "role" && !anaAskRole());
     const tv = !T ? null : k === "num" ? String(T.num) : k === "prime" ? (T.prime ? "1" : "0") : T[k];
     for (const b of $$("button", row)) {
       b.setAttribute("aria-pressed", String(AP.pick[k] === b.dataset.v));
-      b.classList.toggle("dev-ok", !!SH.dev && b.dataset.v === tv); // fejlesztői mód: a jó választás
+      b.classList.toggle("dev-ok", showAnswers() && b.dataset.v === tv); // tanár/fejlesztői mód: a jó választás
     }
   }
   const missing = anaPopNeeds().filter((k) => AP.pick[k] === undefined);
@@ -2145,13 +2201,13 @@ function updateAnaPop() {
   if (missing.length) el.textContent = `Add meg: ${missing.map((k) => AP_NAMES[k]).join(", ")}.`;
   else {
     el.innerHTML = "Felirat: <b></b>";
-    el.querySelector("b").textContent = fmtAtomRole({ el: AP.pick.el, num: +AP.pick.num, prime: AP.pick.prime === "1", role: AP.pick.role });
+    el.querySelector("b").textContent = fmtAtomRole({ el: AP.pick.el, num: +AP.pick.num, prime: AP.pick.prime === "1", role: anaAskRole() ? AP.pick.role : "none" });
   }
 }
 function applyAnaPop() {
   if (AP.i === null || anaPopNeeds().some((k) => AP.pick[k] === undefined)) return;
   const p = AP.pick;
-  A.labels.set(AP.i, { el: p.el, num: +p.num, prime: st.di && p.num !== "0" && p.prime === "1", role: p.role });
+  A.labels.set(AP.i, { el: p.el, num: +p.num, prime: st.di && p.num !== "0" && p.prime === "1", role: anaAskRole() ? p.role : "none" });
   closeAnaPop();
   refreshAnaLabels();
   updateAnaProgress();
@@ -2233,7 +2289,7 @@ function renderComboList() {
     li.textContent = o.label;
     li.setAttribute("aria-selected", String(o.value === val));
     li.classList.toggle("active", k === CB.active);
-    li.classList.toggle("dev-ok", !!SH.dev && o.value === tv); // fejlesztői mód: a jó válasz
+    li.classList.toggle("dev-ok", showAnswers() && o.value === tv); // tanár/fejlesztői mód: a jó válasz
     ul.appendChild(li);
   });
   if (!CB.items.length) {
@@ -2302,11 +2358,12 @@ function bindCombo() {
 function syncAnaSettings() {
   const c = SH.ana;
   $$("#asView button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === c.view)));
+  $$("#asForm button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === (c.form || "mix"))));
   $$("#asSource button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === c.source)));
   $$("#asH button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === c.h)));
   $$("#asOH button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === c.oh)));
   $("#asSourceO").textContent = `Bekarikázottak (${(SH.oset || []).filter(anaEligible).length})`;
-  $("#asSourceAll").textContent = `Összes (${ALL_IDS.filter(anaEligible).length})`;
+  $("#asSourceAll").textContent = `Összes (${ALL_IDS.filter((id) => anaEligible(id) && anaForms(id).length).length})`;
   $("#asBond").checked = c.askBond !== false;
 }
 function bindAna() {
@@ -2321,6 +2378,12 @@ function bindAna() {
     });
   };
   seg("#asView", "view");
+  // ha a mostani feladat formája már nem választható, újat kér
+  seg("#asForm", "form", () => {
+    if (!A.on || A.done) return;
+    const ok = anaForms(A.id).includes(A.t === 0 ? "open" : "ring");
+    if (!ok || !anaPool().ids.includes(A.id)) anaNew(); else renderAna();
+  });
   seg("#asSource", "source", () => { if (A.on && !A.done && !anaPool().ids.includes(A.id)) anaNew(); else renderAna(); });
   const relabel = () => { if (A.on) { refreshAnaLabels(); updateAnaProgress(); changed(); } };
   seg("#asH", "h", relabel);
@@ -2356,18 +2419,25 @@ function bindAna() {
 }
 
 function setMode(mode) {
-  if (!["view", "quiz", "ana"].includes(mode) || mode === currentMode()) return;
+  if (!["view", "quiz", "ana", "print"].includes(mode) || mode === currentMode()) return;
+  if (mode === "print" && !canPrint()) return; // a nyomda csak tanár- és fejlesztői módban
   if (DBG.running) stopDebug(); // a hibakereső a nézegetőben fut
   closeQuizPop();
   closeAnaPop();
   closeCombo();
   Q.on = mode === "quiz";
   A.on = mode === "ana";
+  NY.on = mode === "print";
+  st.playing = false;
   if (Q.on) {
     // a tippelő először a nézegető beállításait és csillagait veszi át
     if (!SQ) SQ = clone(SV);
     if (!SH.xset) SH.xset = [...SH.fav];
     S = SQ;
+  } else if (NY.on) {
+    // a nyomda saját beállításokkal dolgozik (elsőre a nézegetőéit veszi át)
+    if (!SPR) SPR = clone(SV);
+    S = SPR;
   } else {
     S = SV;
   }
@@ -2389,9 +2459,10 @@ function setMode(mode) {
     anaNew();
     try { history.replaceState(null, "", "#analizalo"); } catch { /* beágyazott nézet */ }
   } else {
-    try { history.replaceState(null, "", `#${st.rec.id}`); } catch { /* beágyazott nézet */ }
+    try { history.replaceState(null, "", NY.on ? "#nyomda" : `#${st.rec.id}`); } catch { /* beágyazott nézet */ }
     renderQuiz();
     renderAna();
+    syncPrintSettings();
     pickModels();
     fitCamera();
     markCurrent();
@@ -2644,7 +2715,9 @@ function polyCaption() {
 function quizCaption() {
   const t = st.t, m = model;
   if (A.on) {
-    return "<b>Elemezd a molekulát!</b> Kattints egy atomra, és add meg, melyik atom (elem, sorszám) és mi a szerepe; fent add meg a formáját, a nevét és az összegképletét. A végén: Kiértékelés.";
+    return A.t === 0
+      ? "<b>Elemezd a nyílt láncú molekulát!</b> Kattints egy atomra, és add meg, melyik atom (elem, sorszám); fent a konfigurációt, a nevet és az összegképletet. Az animáció a kiértékelés után játszható le."
+      : "<b>Elemezd a molekulát!</b> Kattints egy atomra, és add meg, melyik atom (elem, sorszám) és mi a szerepe; fent add meg a formáját, a nevét és az összegképletét. Az animáció a kiértékelés után játszható le.";
   }
   const lock = quizAnimLocked() ? " Az animáció a Tippelő beállításaiban ki van kapcsolva; a válasz után megnézheted." : "";
   if (st.poly) return t >= 0.999 ? `<b>Poliszacharid-részlet.</b> Melyik molekula ez?${lock}` : polyCaption();
@@ -2806,8 +2879,18 @@ function atomAtPoint(x, y) {
 canvas.addEventListener("pointerup", (e) => {
   const d = downPt;
   downPt = null;
-  if (!A.on || !d) return;
-  if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6 || performance.now() - d.t > 700) return;
+  if (!d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6 || performance.now() - d.t > 700) return;
+  if (NY.on) {
+    // nyomda: „kiválasztott atomok” feliratozásnál kattintással ki/be
+    if (SH.print.labels !== "pick") return;
+    const i = atomAtPoint(e.clientX, e.clientY);
+    if (i === null) return;
+    if (NY.picks.has(i)) NY.picks.delete(i);
+    else NY.picks.add(i);
+    changed();
+    return;
+  }
+  if (!A.on) return;
   const i = atomAtPoint(e.clientX, e.clientY);
   if (i === null) { closeAnaPop(); return; }
   if (A.done) {
@@ -2877,6 +2960,7 @@ function loop(now) {
   if (needRender || moved || controls.autoRotate) {
     renderer.render(scene, camera);
     updateLabels();
+    if (NY.on) updatePrintPreview(); // a nyomdában a vektoros kép látszik
     needRender = false;
   }
   requestAnimationFrame(loop);
@@ -2924,6 +3008,14 @@ function codeHash(code) { // cyrb53
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
 const CODES = {
+  // tanár mód: a Nyomda és a jó válaszok narancssárga jelölése
+  "1chgqvt008s": {
+    repeatable: true,
+    active: () => !!SH.teach,
+    activeMsg: "A tanár mód már be van kapcsolva. A Nyomda a Nézegető és a Tippelő között van.",
+    msg: "Tanár mód bekapcsolva: a Nézegető és a Tippelő között megjelent a Nyomda, a Tippelőben és az Analizálóban pedig narancssárga jelöli a jó válaszokat.",
+    apply() { SH.teach = true; save(); applyDev(); },
+  },
   // fejlesztői mód: narancs jelölés a tippelőben és a Debugger gomb
   "19p3f8csm7n": {
     repeatable: true,
@@ -2985,6 +3077,326 @@ function bindModals() {
     else if ($(".side.open")) { closeDrawers(); e.preventDefault(); }
     else if (LAYOUT.focus && !e.target.closest("input, select, textarea")) { setFocus(false); e.preventDefault(); }
   });
+}
+
+// ---- nyomda (tanár mód): vektoros kép a látott nézetből ------------------------------------
+// Olyan, mint a nézegető, csak nincs animáció: a nyílt vagy a gyűrűs forma állítható be, és a
+// látott kép (nagyítás, elforgatás) vektoros SVG-ként menthető. A térbeli modellt a kamera
+// szemszögéből síkra vetítjük: az atomok körök, a kötések vonalak; hátulról előre rajzolva a
+// közelebbi rész takarja a távolabbit. A 3D-térben is ez a vektoros kép látszik.
+const svgNum = (x) => (Math.round(x * 100) / 100).toString();
+const svgEsc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const pcol = new THREE.Color();
+/** Lineáris színből SVG-szín; fekete-fehér módban szürke árnyalat. k < 1 sötétít (a körvonalhoz). */
+function svgColor(r, g, b, k = 1) {
+  if (SH.print.bw) { const y = 0.2126 * r + 0.7152 * g + 0.0722 * b; r = g = b = y; }
+  pcol.setRGB(r * k, g * k, b * k);
+  return `#${pcol.getHexString()}`;
+}
+/** Vetítés a kamera szemszögéből: képernyőpont, mélység és nagyítás (képpont / egység). */
+function makeProjector() {
+  const W = Math.max(1, viewport.clientWidth), H = Math.max(1, viewport.clientHeight);
+  camera.updateMatrixWorld();
+  const e = camera.matrixWorldInverse.elements;
+  const f = H / 2 / Math.tan((camera.fov * Math.PI) / 360);
+  return {
+    W, H,
+    p(x, y, z) {
+      const vx = e[0] * x + e[4] * y + e[8] * z + e[12];
+      const vy = e[1] * x + e[5] * y + e[9] * z + e[13];
+      const d = Math.max(1e-3, -(e[2] * x + e[6] * y + e[10] * z + e[14]));
+      return [W / 2 + (vx * f) / d, H / 2 - (vy * f) / d, d, f / d];
+    },
+  };
+}
+/** Egy réteg (fő modell vagy hologram) elemei a példányosított hálók adataiból: pontosan az, ami a képen van. */
+function layerPrims(layer, proj, out, atoms) {
+  if (!layer.m || !layer.group.visible) return;
+  const m = layer.m, R = RADII[S.style];
+  for (const b of layer.sph) {
+    for (let k = 0; k < b.n; k++) {
+      const o = 16 * k, M = b.M;
+      const [x, y, d, sc] = proj.p(M[o + 12], M[o + 13], M[o + 14]);
+      const q = { k: "a", i: b.ids[k], x, y, d, r: M[o] * sc, c: [b.C[3 * k], b.C[3 * k + 1], b.C[3 * k + 2]], a: b.A[k] };
+      out.push(q);
+      if (atoms) atoms.set(q.i, q);
+    }
+  }
+  for (const b of layer.cyl) {
+    for (let k = 0; k < b.n; k++) {
+      const o = 16 * k, M = b.M;
+      const hx = M[o + 4] / 2, hy = M[o + 5] / 2, hz = M[o + 6] / 2, L = 2 * Math.hypot(hx, hy, hz);
+      const cx = M[o + 12], cy = M[o + 13], cz = M[o + 14];
+      const r = Math.hypot(M[o], M[o + 1], M[o + 2]);
+      // a kötésfél az atom felőli végén a gömb széléig tart (ne fusson rá a gömbre)
+      const ra = S.style === "sf" ? 0 : (R[m.el[b.atom[k]]] || R.C) * 0.92;
+      const cut = Math.min(0.95, ra / Math.max(L, 1e-6));
+      let t1 = 0, t2 = 1;
+      if (b.side[k] === 0) t1 = cut; else t2 = 1 - cut;
+      if (t2 - t1 < 0.02) continue;
+      const at = (t) => [cx - hx + 2 * hx * t, cy - hy + 2 * hy * t, cz - hz + 2 * hz * t];
+      const p1 = proj.p(...at(t1)), p2 = proj.p(...at(t2)), pm = proj.p(...at((t1 + t2) / 2));
+      out.push({ k: "b", x1: p1[0], y1: p1[1], x2: p2[0], y2: p2[1], d: pm[2], w: 2 * r * pm[3], c: [b.C[3 * k], b.C[3 * k + 1], b.C[3 * k + 2]], a: b.A[k] });
+    }
+  }
+  for (const mesh of layer.rings) {
+    if (!mesh.visible) continue;
+    const pos = mesh.geometry.attributes.position, pts = [];
+    for (let j = 1; j < pos.count; j++) pts.push(proj.p(pos.getX(j), pos.getY(j), pos.getZ(j)));
+    const c0 = proj.p(pos.getX(0), pos.getY(0), pos.getZ(0));
+    pcol.set(ringFillColor());
+    out.push({ k: "r", pts, d: c0[2] + 0.5, c: [pcol.r, pcol.g, pcol.b], a: mesh.material.opacity });
+  }
+}
+function primSVG(q) {
+  const P = SH.print, hollow = P.fill === "hollow";
+  const op = q.a < 0.995 ? ` opacity="${svgNum(q.a)}"` : "";
+  const dark = (c) => (P.blackOutline ? "#000000" : svgColor(c[0], c[1], c[2], 0.35));
+  // a nagyon világos (pl. fehér H) elem teli módban is kap egy vékony szegélyt, hogy fehér lapon is látsszon
+  const light = 0.2126 * q.c[0] + 0.7152 * q.c[1] + 0.0722 * q.c[2] > 0.6;
+  if (q.k === "a") {
+    const fill = svgColor(...q.c);
+    if (!hollow && light) {
+      const sw = Math.max(0.6, q.r * 0.07);
+      return `<circle cx="${svgNum(q.x)}" cy="${svgNum(q.y)}" r="${svgNum(Math.max(0.3, q.r - sw / 2))}" fill="${fill}" stroke="${svgColor(q.c[0], q.c[1], q.c[2], 0.55)}" stroke-width="${svgNum(sw)}"${op}/>`;
+    }
+    if (!hollow) return `<circle cx="${svgNum(q.x)}" cy="${svgNum(q.y)}" r="${svgNum(q.r)}" fill="${fill}"${op}/>`;
+    // üreges: a belső rész a megadott szín, a körvonal ennek sötétebb változata (vagy fekete)
+    const sw = Math.max(0.8, q.r * 0.16);
+    return `<circle cx="${svgNum(q.x)}" cy="${svgNum(q.y)}" r="${svgNum(Math.max(0.3, q.r - sw / 2))}" fill="${fill}" stroke="${dark(q.c)}" stroke-width="${svgNum(sw)}"${op}/>`;
+  }
+  if (q.k === "b") {
+    const col = svgColor(...q.c), xy = `x1="${svgNum(q.x1)}" y1="${svgNum(q.y1)}" x2="${svgNum(q.x2)}" y2="${svgNum(q.y2)}"`;
+    if (!hollow && light) {
+      const ow = Math.max(0.5, q.w * 0.12);
+      return `<g${op}><line ${xy} stroke="${svgColor(q.c[0], q.c[1], q.c[2], 0.55)}" stroke-width="${svgNum(q.w)}"/><line ${xy} stroke="${col}" stroke-width="${svgNum(Math.max(0.4, q.w - 2 * ow))}"/></g>`;
+    }
+    if (!hollow) return `<line ${xy} stroke="${col}" stroke-width="${svgNum(q.w)}"${op}/>`;
+    const ow = Math.max(0.7, q.w * 0.2);
+    return `<g${op}><line ${xy} stroke="${dark(q.c)}" stroke-width="${svgNum(q.w)}"/><line ${xy} stroke="${col}" stroke-width="${svgNum(Math.max(0.4, q.w - 2 * ow))}"/></g>`;
+  }
+  const pts = q.pts.map((p) => `${svgNum(p[0])},${svgNum(p[1])}`).join(" ");
+  return `<polygon points="${pts}" fill="${svgColor(...q.c)}" fill-opacity="${svgNum(q.a)}"/>`;
+}
+/** Mely atomok kapjanak feliratot, és mi legyen a szövegük. */
+function printLabels(atoms) {
+  const P = SH.print, m = model, out = [];
+  if (P.labels === "none" || !m) return out;
+  const t = st.t;
+  // a szerep ott látszik, ahol a színezés is (nyílt láncon csak a „Kiemelés a nyílt láncon is” mellett)
+  const rolesNow = P.roles && !(m.kind === "closure" && !S.hlOpen && t < 0.5);
+  const role = (i) => (rolesNow && m.groupOf[i] ? ` · ${ROLE_SHORT[m.groupOf[i]]}` : "");
+  if (P.labels === "carbons") {
+    // mint a nézegetőben: a szénlánc számozása, a gyűrű-O és a glikozidos kötés
+    for (const L of labelEls) {
+      const q = atoms.get(L.i);
+      if (!q || L.ana || mainLayer.alpha[L.i] < 0.3) continue;
+      if (L.link && (L.gate !== undefined ? mainLayer.alpha[L.gate] < 0.6 : t < 0.6)) continue;
+      out.push({ q, text: L.link ? L.el.textContent : L.el.textContent + role(L.i), link: !!L.link });
+    }
+    return out;
+  }
+  for (const [i, q] of atoms) {
+    if (mainLayer.alpha[i] < 0.3) continue;
+    const el = m.el[i];
+    if (P.labels === "heavy" && el === "H") continue;
+    if (P.labels === "pick" && !NY.picks.has(i)) continue;
+    let lab = m.lab[i];
+    if (el === "H" || !lab) {
+      // a H a hozzá kötött atom számát kapja (az adott pillanatban)
+      let host = null, best = 0;
+      for (const b of m.bonds) {
+        if (b.i !== i && b.j !== i) continue;
+        const a = b.alpha(t);
+        if (a > best) { best = a; host = b.i === i ? b.j : b.i; }
+      }
+      const mm = el === "H" && host !== null ? /(\d+)(′?)/.exec(m.lab[host] || "") : null;
+      lab = mm ? `H${mm[1]}${mm[2]}` : el;
+    }
+    out.push({ q, text: lab + role(i) });
+  }
+  return out;
+}
+/** A látott kép vektorosan (SVG). Előnézetben nem vág körbe, csak keretet rajzol a vágás helyére. */
+function buildSVG(preview = false) {
+  const proj = makeProjector(), { W, H } = proj, P = SH.print;
+  const main = [], holo = [], atoms = new Map();
+  layerPrims(mainLayer, proj, main, atoms);
+  if (S.holo && !A.on && holoLayer.group.visible) layerPrims(holoLayer, proj, holo, null);
+  main.sort((a, b) => b.d - a.d);
+  holo.sort((a, b) => b.d - a.d);
+  const fs = Math.max(10, Math.min(16, Math.round(Math.min(W, H) / 48)));
+  const title = st.rec ? `${st.rec.name} – ${stateName()}` : "Szénhidrát 3D";
+  const labs = printLabels(atoms);
+  // a kép kerete: a látott terület, vagy (ha kérik) a rajz köré vágva
+  let vx = 0, vy = 0, vw = W, vh = H;
+  if (P.crop) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    const grow = (ax, ay, bx = ax, by = ay) => { x0 = Math.min(x0, ax); y0 = Math.min(y0, ay); x1 = Math.max(x1, bx); y1 = Math.max(y1, by); };
+    for (const q of [...main, ...holo]) {
+      if (q.k === "a") grow(q.x - q.r, q.y - q.r, q.x + q.r, q.y + q.r);
+      else if (q.k === "b") { grow(q.x1 - q.w / 2, q.y1 - q.w / 2, q.x1 + q.w / 2, q.y1 + q.w / 2); grow(q.x2 - q.w / 2, q.y2 - q.w / 2, q.x2 + q.w / 2, q.y2 + q.w / 2); }
+      else for (const p of q.pts) grow(p[0], p[1]);
+    }
+    for (const { q, text } of labs) {
+      const x = q.x + q.r * 0.72 + 2, y = q.y - q.r * 0.72 - 2;
+      grow(x, y - fs, x + fs * 0.6 * text.length, y + fs * 0.3);
+    }
+    if (x1 > x0) {
+      const pad = 12;
+      vx = Math.floor(x0 - pad); vy = Math.floor(y0 - pad);
+      vw = Math.ceil(x1 - x0 + 2 * pad); vh = Math.ceil(y1 - y0 + 2 * pad);
+    }
+  }
+  const crop = preview && P.crop ? { vx, vy, vw, vh } : null;
+  if (preview) { vx = 0; vy = 0; vw = W; vh = H; }
+  const parts = [`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vx} ${vy} ${vw} ${vh}" width="${vw}" height="${vh}">`, `<title>${svgEsc(title)}</title>`];
+  if (P.bg !== "transparent") parts.push(`<rect x="${vx}" y="${vy}" width="${vw}" height="${vh}" fill="#ffffff"/>`);
+  parts.push(`<g stroke-linecap="butt">${main.map(primSVG).join("")}</g>`);
+  if (holo.length) parts.push(`<g stroke-linecap="butt">${holo.map(primSVG).join("")}</g>`);
+  if (labs.length) {
+    parts.push(`<g font-family="Arial, Helvetica, sans-serif" font-size="${fs}" fill="#111111" stroke="#ffffff" stroke-width="${svgNum(fs / 4)}" stroke-linejoin="round" paint-order="stroke">`);
+    for (const { q, text, link } of labs) {
+      const x = q.x + q.r * 0.72 + 2, y = q.y - q.r * 0.72 - 2;
+      parts.push(`<text x="${svgNum(x)}" y="${svgNum(y)}"${link ? ' font-weight="bold"' : ""}>${svgEsc(text)}</text>`);
+    }
+    parts.push("</g>");
+  }
+  if (crop) parts.push(`<rect x="${crop.vx}" y="${crop.vy}" width="${crop.vw}" height="${crop.vh}" fill="none" stroke="#1c6ccf" stroke-width="1" stroke-dasharray="6 4"/>`);
+  parts.push("</svg>");
+  return parts.join("");
+}
+/** A nyomdában a 3D-tér helyén a vektoros kép látszik (csak ha változott). */
+function updatePrintPreview() {
+  if (!NY.on || !model) return;
+  const key = `${st.rec.id}|${st.cfg}|${st.vkey}|${st.tl}`;
+  if (key !== NY.pickKey) { NY.pickKey = key; NY.picks.clear(); }
+  const html = buildSVG(true);
+  if (html !== NY.html) {
+    NY.html = html;
+    $("#printView").innerHTML = html;
+  }
+}
+function printFileName(ext) {
+  const base = norm(`${st.rec.name} ${stateName()} ${model.paper ? "2d" : "3d"}`).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return `${base || "molekula"}.${ext}`;
+}
+function setPrintMsg(text) {
+  const el = $("#printMsg");
+  el.textContent = text;
+  el.hidden = !text;
+}
+/* A claude.ai-n közzétett változat keretben fut, ahonnan közvetlenül nem lehet
+   letölteni: ott a platform mentése adja át a fájlt (a néző jóváhagyásával).
+   Máshol (GitHub, helyi fájl) a szokásos letöltés megy. */
+let hostDownloads = null;
+try {
+  if (window.claude && typeof window.claude.use === "function") {
+    window.claude.use("downloads").then((d) => {
+      hostDownloads = d || null;
+      // a keretből nyitott új lap nem mindig működik, a mentés viszont igen
+      const open = document.getElementById("btnExportOpen");
+      if (hostDownloads && open) open.hidden = true;
+    }, () => {});
+  }
+} catch (e) { /* nincs ilyen környezet */ }
+function saveFile(blob, name, hint = "") {
+  if (hostDownloads) {
+    hostDownloads.save({ filename: name, data: blob }).then(
+      () => setPrintMsg(`Mentve: ${name}.`),
+      (e) => {
+        const code = (e && e.code) || "";
+        setPrintMsg(code === "declined" ? "A mentés megszakítva."
+          : code === "rate_limited" ? "Egy mentés már folyamatban van; próbáld újra pár másodperc múlva."
+          : "Itt nem sikerült a mentés. Nyisd meg az oldalt böngészőben, és onnan mentsd.");
+      });
+    return;
+  }
+  const url = URL.createObjectURL(blob), a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  setPrintMsg(`Letöltve: ${name}.${hint}`);
+}
+/** Mentés: letöltés, vagy megnyitás új lapon (onnan menthető). */
+function exportSVG(how) {
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>\n${buildSVG()}`;
+  const blob = new Blob([svg], { type: "image/svg+xml" });
+  if (how === "open") {
+    const url = URL.createObjectURL(blob);
+    const w = window.open(url, "_blank", "noopener");
+    setPrintMsg(w ? "" : "A böngésző nem engedte megnyitni az új lapot; használd a Letöltés gombot.");
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } else {
+    saveFile(blob, printFileName("svg"), " Ha nem indult el a letöltés, használd a Megnyitás új lapon gombot.");
+  }
+}
+/** PNG is (nagy felbontásban), ha a szövegszerkesztő nem kezeli az SVG-t (pl. Google Dokumentumok). */
+function exportPNG() {
+  const svg = buildSVG(), k = 3;
+  const vb = /viewBox="([-\d.]+) ([-\d.]+) ([\d.]+) ([\d.]+)"/.exec(svg);
+  const W = vb ? +vb[3] : viewport.clientWidth, H = vb ? +vb[4] : viewport.clientHeight;
+  const img = new Image();
+  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  img.onload = () => {
+    const c = document.createElement("canvas");
+    c.width = W * k;
+    c.height = H * k;
+    c.getContext("2d").drawImage(img, 0, 0, W * k, H * k);
+    URL.revokeObjectURL(url);
+    c.toBlob((blob) => {
+      if (!blob) { setPrintMsg("A PNG nem készült el."); return; }
+      saveFile(blob, printFileName("png"));
+    }, "image/png");
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); setPrintMsg("A PNG nem készült el."); };
+  img.src = url;
+}
+function syncPrintSettings() {
+  const P = SH.print;
+  $$("#prColor button").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.v === "bw") === !!P.bw)));
+  $$("#prFill button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === P.fill)));
+  $$("#prBg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === P.bg)));
+  $("#prBlack").checked = !!P.blackOutline;
+  $("#prBlack").disabled = P.fill !== "hollow";
+  $("#prBlack").closest(".toggle").classList.toggle("off", P.fill !== "hollow");
+  $("#prLabels").value = P.labels;
+  $("#prRoles").checked = !!P.roles;
+  $("#prCrop").checked = !!P.crop;
+  $("#prPickHint").hidden = P.labels !== "pick";
+  $("#prTeachOff").hidden = !SH.teach;
+}
+function bindPrint() {
+  const seg = (id, apply) => {
+    $(id).addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      apply(b.dataset.v);
+      save();
+      syncPrintSettings();
+      changed();
+    });
+  };
+  seg("#prColor", (v) => { SH.print.bw = v === "bw"; });
+  seg("#prFill", (v) => { SH.print.fill = v; });
+  seg("#prBg", (v) => { SH.print.bg = v; });
+  $("#prBlack").addEventListener("change", (e) => { SH.print.blackOutline = e.target.checked; save(); changed(); });
+  $("#prRoles").addEventListener("change", (e) => { SH.print.roles = e.target.checked; save(); changed(); });
+  $("#prCrop").addEventListener("change", (e) => { SH.print.crop = e.target.checked; save(); changed(); });
+  $("#prLabels").addEventListener("change", (e) => { SH.print.labels = e.target.value; save(); syncPrintSettings(); changed(); });
+  $("#prCopyView").addEventListener("click", () => {
+    SPR = clone(SV);
+    if (NY.on) S = SPR;
+    save(); refreshHl(); refreshElColors(); syncControls(); pickModels(); fitCamera(); updateStaticUI(); changed();
+  });
+  $("#prTeachOff").addEventListener("click", () => { SH.teach = false; save(); applyDev(); });
+  $("#btnExport").addEventListener("click", () => exportSVG("download"));
+  $("#btnExportOpen").addEventListener("click", () => exportSVG("open"));
+  $("#btnExportPng").addEventListener("click", exportPNG);
+  syncPrintSettings();
 }
 
 // ---- fejlesztői mód: hibakereső (Debugger) ------------------------------------------------
@@ -3364,8 +3776,11 @@ function syncDebugUI() {
 function applyDev() {
   if (!SH.dev) stopDebug();
   syncDebugUI();
+  if (NY.on && !canPrint()) setMode("view");
   renderQuiz();
   if (A.on) updateAnaForm();
+  applyModeUI();
+  syncPrintSettings();
 }
 function bindDebugger() {
   $("#btnDebug").addEventListener("click", () => {
@@ -3431,6 +3846,7 @@ syncQuizSettings();
 bindModals();
 bindQuizPop();
 bindAna();
+bindPrint();
 bindDebugger();
 bindLayout();
 resetScroll();
@@ -3442,10 +3858,12 @@ load(recOf(startId) ? startId : "glukoz");
 renderQuiz();
 if (startId === "tippelo") setMode("quiz");
 else if (startId === "analizalo") setMode("ana");
+else if (startId === "nyomda") setMode("print");
 window.addEventListener("hashchange", () => {
   const id = decodeURIComponent(location.hash.slice(1));
   if (id === "tippelo") setMode("quiz");
   else if (id === "analizalo") setMode("ana");
-  else if (recOf(id) && (Q.on || A.on || id !== st.rec.id)) { setMode("view"); select(id); }
+  else if (id === "nyomda") setMode("print");
+  else if (recOf(id) && (Q.on || A.on || id !== st.rec.id)) { if (!NY.on) setMode("view"); select(id); }
 });
 requestAnimationFrame(loop);

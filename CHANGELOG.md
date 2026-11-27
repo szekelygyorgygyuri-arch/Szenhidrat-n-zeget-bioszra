@@ -1,5 +1,32 @@
 # Változások (changelog)
 
+## 1.8 – 2026-11-27
+
+### Új
+- **Analizáló nyílt láncú formában is:**
+  - A beállításokban választható a forma: gyűrűs, nyílt lánc vagy vegyesen.
+  - Nyílt láncban nincs gyűrű és anomer, ezért a gyűrűhöz kötött szerepeket (glikozidos OH, gyűrű-O, ficak, kamuficak) sem kell megadni. Az atomoknál az elemet és a sorszámot kell beírni, fent pedig a konfigurációt (D/L), a nevet és az összegképletet.
+  - Diszacharidnál a redukáló vég egysége nyílik fel. A másik egység gyűrűs marad, ott a szerepeket is meg kell adni. A nem redukáló diszacharidok (pl. szacharóz) csak gyűrűs formában szerepelnek.
+  - Az animáció a Kiértékelés után lejátszható, gyűrűs formában is.
+- **Tanár mód** (kóddal kapcsolható be):
+  - A Tippelőben és az Analizálóban narancssárga jelöli a jó válaszokat, mint a fejlesztői módban. Az Analizálóban egy gombbal kitölthető a megoldás.
+  - Megjelenik a **Nyomda** fül a Nézegető és a Tippelő között. Fejlesztői módban is látszik.
+- **Nyomda** – képek feladatlapokhoz:
+  - Olyan, mint a nézegető, de a lejátszás helyett exportálni lehet.
+    - A kép mindig vektoros (SVG).
+    - Pontosan úgy készül, ahogy a középső részen látszik: számít a nagyítás, az elforgatás, a nézet (3D vagy 2D) és a forma (nyílt vagy gyűrűs).
+  - A kép letölthető, vagy megnyitható új lapon. Ha a szövegszerkesztő nem fogadja az SVG-t, nagy felbontású PNG is kérhető.
+  - Ugyanaz a molekulaválasztó és ugyanazok a csillagok, mint a nézegetőben.
+  - A megjelenítési beállításai viszont külön vannak: amit az egyikben átkapcsolsz, az a másikban nem változik. Egy gombbal átvehetők a nézegető beállításai.
+  - Saját beállítások:
+    - színes vagy fekete-fehér;
+    - teli vagy üreges atomok és kötések: üregesnél a belső rész a beállított szín, a körvonal ennek sötétebb változata, vagy bepipálva mindig fekete;
+    - feliratok: nincs, C-atomok számozása, minden atom a H-k kivételével, minden atom, vagy csak a kattintással kiválasztott atomok;
+    - a szerep is a feliratban (pl. O1 · glik. OH);
+    - körbevágás a molekulára (az előnézeten szaggatott keret mutatja);
+    - fehér vagy átlátszó háttér.
+  - A tanár mód a Nyomda beállításai között kapcsolható ki.
+
 ## 1.7 – 2026-11-25
 
 ### Új

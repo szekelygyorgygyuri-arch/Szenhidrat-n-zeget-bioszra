@@ -346,7 +346,19 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 50%; }
 .app.ana-mode .item[aria-current="true"] { background: transparent; color: inherit; }
 .app.ana-mode .star-filter[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
 .app:not(.ana-mode) .ana-only, .app.ana-mode .ana-hide, .app.ana-mode .view-only { display: none; }
-.app.ana-mode #holoQ, .app.ana-mode .tl-row, .app.ana-mode #tlTabs { display: none; }
+.app.ana-mode #holoQ, .app.ana-mode:not(.ana-done) .tl-row, .app.ana-mode:not(.ana-done) #tlTabs { display: none; }
+.ana-units .na { font-size: 11.5px; color: var(--faint); font-style: italic; }
+/* nyomda: a 3D-tér helyén a vektoros kép, a lejátszás helyett mentés */
+.print-view { position: absolute; inset: 0; pointer-events: none; display: none; }
+.print-view svg { width: 100%; height: 100%; display: block; }
+.app.print-mode .print-view { display: block; }
+.app.print-mode #canvas { opacity: 0; }
+.app.print-mode #labels, .app.print-mode .overlay-tl, .app.print-mode .overlay-tr { display: none; }
+.app.print-mode #btnPlay, .app.print-mode #scrub, .app.print-mode #speed { display: none; }
+.app:not(.print-mode) .print-only, .app.print-mode .print-hide { display: none; }
+.app.print-mode .print-only.btn { flex: none; }
+.print-msg { margin: 0; font-size: 12.5px; color: var(--muted); }
+.toggle.off { opacity: .5; }
 /* az analizáló felső része */
 .ana-form { display: grid; gap: 6px; }
 .ana-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
@@ -712,7 +724,7 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
 </head>
 <body>
 <header class="topbar">
-  <a class="ver" id="verLink" href="https://github.com/szekelygyorgygyuri-arch/Szenhidrat-n-zeget-bioszra/blob/main/CHANGELOG.md" target="_blank" rel="noopener">v1.7<span class="long"> · újdonságok</span></a>
+  <a class="ver" id="verLink" href="https://github.com/szekelygyorgygyuri-arch/Szenhidrat-n-zeget-bioszra/blob/main/CHANGELOG.md" target="_blank" rel="noopener">v1.8<span class="long"> · újdonságok</span></a>
   <div class="layout-btns" role="group" aria-label="Panelek">
     <button type="button" class="tbtn pnl" id="tglLeft" aria-pressed="true" title="A molekulalista (bal oldali panel) megjelenítése vagy elrejtése">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/></svg>
@@ -790,6 +802,7 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
       </div>
       <div class="seg mode" id="segMode" role="group" aria-label="Mód">
         <button type="button" data-v="view" aria-pressed="true">Nézegető</button>
+        <button type="button" data-v="print" aria-pressed="false" hidden>Nyomda</button>
         <button type="button" data-v="quiz" aria-pressed="false">Tippelő</button>
         <button type="button" data-v="ana" aria-pressed="false">Analizáló</button>
       </div>
@@ -829,6 +842,7 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
     </header>
     <div class="viewport" id="viewport">
       <canvas id="canvas" aria-label="A molekula 3D modellje"></canvas>
+      <div class="print-view" id="printView" aria-label="A nyomtatható (vektoros) kép előnézete"></div>
       <div class="labels" id="labels"></div>
       <div class="overlay-tl"><div class="legend" id="legend"></div></div>
       <div class="overlay-tr"><div class="rel" id="rel"></div></div>
@@ -873,12 +887,16 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
         </button>
         <input class="scrub" id="scrub" type="range" min="0" max="1000" step="1" value="1000" aria-label="Az animáció állása">
         <button class="endbtn" id="btnEnd" type="button">Gyűrűs forma</button>
+        <button type="button" class="btn primary print-only" id="btnExport" title="A látott kép letöltése vektoros SVG-képként">Letöltés (SVG)</button>
+        <button type="button" class="btn print-only" id="btnExportOpen" title="A kép megnyitása új lapon (onnan menthető)">Megnyitás új lapon</button>
+        <button type="button" class="btn print-only" id="btnExportPng" title="Nagy felbontású PNG, ha a szövegszerkesztő nem fogadja az SVG-t">PNG</button>
         <select class="speed" id="speed" aria-label="Sebesség">
           <option value="0.5">0,5×</option>
           <option value="1" selected>1×</option>
           <option value="2">2×</option>
         </select>
       </div>
+      <p class="print-msg print-only" id="printMsg" hidden aria-live="polite"></p>
       <p class="caption" id="caption"></p>
     </div>
   </main>
@@ -942,6 +960,54 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
         </div>
       </section>
 
+      <section class="sec print-only" aria-labelledby="h-pr">
+        <h3 id="h-pr">Nyomda beállításai</h3>
+        <p class="hint">A kép pontosan úgy készül, ahogy a középső részen látod: számít a nagyítás és az elforgatás. A nyílt vagy gyűrűs formát lent, a lejátszás helyén állíthatod.</p>
+        <div class="field">
+          <span class="lab">Színek</span>
+          <div class="seg" id="prColor" role="group" aria-label="Színek">
+            <button type="button" data-v="color">Színes</button>
+            <button type="button" data-v="bw">Fekete-fehér</button>
+          </div>
+        </div>
+        <div class="field">
+          <span class="lab">Atomok és kötések</span>
+          <div class="seg" id="prFill" role="group" aria-label="Atomok és kötések">
+            <button type="button" data-v="filled">Teli</button>
+            <button type="button" data-v="hollow">Üreges</button>
+          </div>
+          <span class="hint">Üregesnél a belső rész a beállított szín, a körvonal ennek sötétebb változata.</span>
+        </div>
+        <label class="toggle"><input type="checkbox" id="prBlack"><span class="sw"></span><span class="tx">A körvonal mindig fekete<small>csak üreges atomoknál és kötéseknél</small></span></label>
+        <div class="field">
+          <label class="lab" for="prLabels">Feliratok</label>
+          <select class="select" id="prLabels">
+            <option value="none">Nincs felirat</option>
+            <option value="carbons">C-atomok számozása (mint a nézegetőben)</option>
+            <option value="heavy">Minden atom, a H-k kivételével</option>
+            <option value="all">Minden atom</option>
+            <option value="pick">Csak a kiválasztott atomok</option>
+          </select>
+          <span class="hint" id="prPickHint">Kattints a középső részen az atomokra: a kattintott atom felirata megjelenik, újabb kattintásra eltűnik.</span>
+        </div>
+        <label class="toggle"><input type="checkbox" id="prRoles"><span class="sw"></span><span class="tx">A szerep is a feliratban<small>pl. O1 · glik. OH, C6 · ficak</small></span></label>
+        <label class="toggle"><input type="checkbox" id="prCrop"><span class="sw"></span><span class="tx">Körbevágás a molekulára<small>a kimentett képen nincs üres szél (a nagyítás így csak a felbontást befolyásolja)</small></span></label>
+        <div class="field">
+          <span class="lab">Háttér</span>
+          <div class="seg" id="prBg" role="group" aria-label="Háttér">
+            <button type="button" data-v="white">Fehér</button>
+            <button type="button" data-v="transparent">Átlátszó</button>
+          </div>
+        </div>
+        <div class="field">
+          <span class="hint">A nyomda saját megjelenítési beállításokkal dolgozik (lent), ezek nem változtatják a nézegetőét.</span>
+          <div class="small-btns">
+            <button type="button" class="btn" id="prCopyView">Nézegető beállításainak átvétele</button>
+            <button type="button" class="btn" id="prTeachOff">Tanár mód kikapcsolása</button>
+          </div>
+        </div>
+      </section>
+
       <section class="sec ana-only" aria-labelledby="h-as">
         <h3 id="h-as">Analizáló beállításai</h3>
         <div class="field">
@@ -954,12 +1020,21 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
           <span class="hint">A változás a következő molekulától érvényes.</span>
         </div>
         <div class="field">
+          <span class="lab">Forma</span>
+          <div class="seg" id="asForm" role="group" aria-label="Forma az analizálóban">
+            <button type="button" data-v="ring">Gyűrűs</button>
+            <button type="button" data-v="open">Nyílt lánc</button>
+            <button type="button" data-v="mix">Vegyesen</button>
+          </div>
+          <span class="hint">Nyílt láncban nincs gyűrű, anomer és gyűrűs szerep (glikozidos OH, gyűrű-O, ficak): ott az elemet és a sorszámot kell megadni, fent a konfigurációt, a nevet és az összegképletet. Az animáció mindig csak a kiértékelés után játszható le.</span>
+        </div>
+        <div class="field">
           <span class="lab">Miből válasszon</span>
           <div class="seg" id="asSource" role="group" aria-label="Miből válasszon">
             <button type="button" data-v="o" id="asSourceO">Bekarikázottak</button>
             <button type="button" data-v="all" id="asSourceAll">Összes</button>
           </div>
-          <span class="hint">A bal oldali listában karikával jelölöd ki a molekulákat (elsőre a csillagozottak vannak bekarikázva). Egyelőre csak a gyűrűs formájú mono- és diszacharidok elemezhetők, ezért itt nincs animáció.</span>
+          <span class="hint">A bal oldali listában karikával jelölöd ki a molekulákat (elsőre a csillagozottak vannak bekarikázva). Mono- és diszacharidok elemezhetők; a nem redukáló diszacharidoknak nincs nyílt formája.</span>
           <div class="small-btns">
             <button type="button" class="btn" id="asFromFav">Csillagozottak bekarikázása</button>
             <button type="button" class="btn" id="asClearO">Karikák törlése</button>
@@ -1044,7 +1119,7 @@ body.focus .stage-head:not(.info-open) .desc, body.focus .stage-head:not(.info-o
         <h3 id="h-vis">Láthatóság</h3>
         <label class="toggle"><input type="checkbox" id="showH"><span class="sw"></span><span class="tx">H-atomok</span></label>
         <label class="toggle"><input type="checkbox" id="showOH"><span class="sw"></span><span class="tx">Sima OH-csoportok<small>a nem kiemelt hidroxilcsoportok</small></span></label>
-        <label class="toggle"><input type="checkbox" id="showLabels"><span class="sw"></span><span class="tx">C-atomok számozása</span></label>
+        <label class="toggle print-hide"><input type="checkbox" id="showLabels"><span class="sw"></span><span class="tx">C-atomok számozása</span></label>
         <label class="toggle"><input type="checkbox" id="ringFill"><span class="sw"></span><span class="tx">Gyűrű síkjának jelölése</span></label>
       </section>
 
